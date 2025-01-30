@@ -1,0 +1,3 @@
+[submodule "libs/candle"]
+	path = libs/candle
+	url = https://github.com/computer-whisperer/candle
