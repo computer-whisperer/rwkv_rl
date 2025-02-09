@@ -1,3 +1,6 @@
 [submodule "libs/candle"]
 	path = libs/candle
 	url = https://github.com/computer-whisperer/candle
+[submodule "crates/rusty_bar/libs/spring"]
+	path = crates/rusty_bar/libs/spring
+	url = https://github.com/beyond-all-reason/spring
