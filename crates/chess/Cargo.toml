@@ -1,0 +1,38 @@
+[package]
+name = "chess"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "uci_chess"
+path = "src/uci_main.rs"
+
+[[bin]]
+name = "self_play_chess"
+path = "src/self_play_main.rs"
+
+[lib]
+name = "chessbot_lib"
+path = "src/lib.rs"
+
+[dependencies]
+uci-parser = "1.1.0"
+shakmaty = "0.27.2"
+rwkv = {path = "../rwkv"}
+
+rwkv-tokenizer = {path="../../libs/rwkv-tokenizer/rwkv-tokenizer"}
+#burn = {version="0.16.0", default-features=false }
+#burn-import = {version="0.16.0", default-features=false, features=["pytorch"] }
+burn = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-import = {git="https://github.com/tracel-ai/burn", default-features=false, features=["pytorch"] }
+rand = "0.8.5"
+llm-samplers = "0.0.7"
+
+[features]
+wgpu = ["burn/wgpu"]
+#hip = ["burn/hip"]
+#cuda = ["burn/cuda-jit"]
+#candle = ["burn/candle"]
+vulkan = ["burn/vulkan"]
+#fusion = ["burn/fusion"]
+ndarray = ["burn/ndarray", "burn/openblas"]
