@@ -4,3 +4,6 @@
 [submodule "crates/rusty_bar/libs/spring"]
 	path = crates/rusty_bar/libs/spring
 	url = https://github.com/beyond-all-reason/spring
+[submodule "libs/rwkv-tokenizer"]
+	path = libs/rwkv-tokenizer
+	url = https://github.com/cahya-wirawan/rwkv-tokenizer
