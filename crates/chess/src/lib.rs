@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::path::Path;
 use burn::prelude::{Backend, Device, Module};
 use burn::record::{FullPrecisionSettings, Recorder};
@@ -16,8 +18,10 @@ pub fn load_model<B: Backend>(device: &Device<B>) -> RWKV7<B> {
             (rwkv::RWKV7Config::rwkv_7_2b9(), model_repo.join("rwkv-7-world/RWKV-x070-World-2.9B-v3-20250211-ctx4096.pth"))
         } else if false {
             (rwkv::RWKV7Config::rwkv_7_2b9(), model_repo.join("temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth"))
+        } else if false {
+            (rwkv::RWKV7Config::rwkv_7_1b5(), model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth"))
         } else if true {
-            (rwkv::RWKV7Config::rwkv_7_1b5(), model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth"))
+            (rwkv::RWKV7Config::rwkv_7_1b5(), model_repo.join("RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth"))
         } else if false {
             (rwkv::RWKV7Config::rwkv_7_1b5(), model_repo.join("rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth"))
         } else {

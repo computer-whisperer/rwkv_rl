@@ -6,14 +6,22 @@ use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
 use rwkv_tokenizer::WorldTokenizer;
 use crate::{LayerState, RWKV7};
+use crate::context_manager::ContextManagerError::{MissingContextError, MissingLogitError};
 use crate::sampling::Sampler;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum UnprocessedTokens<B: Backend> {
+    #[default]
+    None,
     Logit(Tensor<B, 1>),
     Tokens(Vec<u16>),
-    Text(String),
-    None
+    Text(String)
+}
+
+#[derive(Debug, Clone)]
+pub enum ContextManagerError {
+    MissingContextError,
+    MissingLogitError
 }
 
 #[derive(Debug, Clone)]
@@ -89,15 +97,14 @@ impl<B: Backend> ContextManager<B> {
         self.last_layer_state.as_ref()
     }
 
-    pub fn add_unprocessed_tokens(&mut self, tokens: &[u16]) {
+    pub fn add_tokens(&mut self, tokens: &[u16]) {
         self.unprocessed_tokens = UnprocessedTokens::Tokens(
-            match &self.unprocessed_tokens {
-                UnprocessedTokens::Logit(logit) => {
+            match std::mem::take(&mut self.unprocessed_tokens) {
+                UnprocessedTokens::Logit(_logit) => {
                     // Unsampled logits get discarded
                     tokens.to_vec()
                 }
-                UnprocessedTokens::Tokens(unprocessed_tokens) => {
-                    let mut unprocessed_tokens = unprocessed_tokens.clone();
+                UnprocessedTokens::Tokens(mut unprocessed_tokens) => {
                     unprocessed_tokens.extend(tokens);
                     unprocessed_tokens
                 }
@@ -105,7 +112,7 @@ impl<B: Backend> ContextManager<B> {
                     tokens.to_vec()
                 }
                 UnprocessedTokens::Text(text) => {
-                    let mut unprocessed_tokens = self.tokenizer.encode(text);
+                    let mut unprocessed_tokens = self.tokenizer.encode(&text);
                     unprocessed_tokens.extend(tokens);
                     unprocessed_tokens
                 }
@@ -128,17 +135,23 @@ impl<B: Backend> ContextManager<B> {
         sum/values.len() as f32
     }
 
-    pub fn add_unprocessed_text(&mut self, text: &str) {
-        let tokens = self.tokenizer.encode(text);
-        self.add_unprocessed_tokens(&tokens);
+    pub fn add_text(&mut self, text: &str) -> Result<(), Utf8Error> {
+        let existing_text = match std::mem::take(&mut self.unprocessed_tokens){
+            UnprocessedTokens::Logit(_) => {String::new()}
+            UnprocessedTokens::Tokens(tokens) => {self.tokenizer.decode(tokens)?}
+            UnprocessedTokens::None => {String::new()}
+            UnprocessedTokens::Text(text) => {text}
+        };
+        self.unprocessed_tokens = UnprocessedTokens::Text(existing_text + text);
+        Ok(())
     }
 
-    pub fn rwkv_forward(&mut self, rwkv: &RWKV7<B>, device: &Device<B>) {
-        let input_tokens = match &self.unprocessed_tokens {
-            UnprocessedTokens::Logit(_) => {panic!()}
-            UnprocessedTokens::Tokens(tokens) => {tokens.clone()}
-            UnprocessedTokens::None => {panic!()}
-            UnprocessedTokens::Text(text) => {self.tokenizer.encode(text)}
+    pub fn rwkv_forward(&mut self, rwkv: &RWKV7<B>, device: &Device<B>) -> Result<(), ContextManagerError> {
+        let input_tokens = match std::mem::take(&mut self.unprocessed_tokens) {
+            UnprocessedTokens::Logit(_) => {return Err(MissingContextError)}
+            UnprocessedTokens::Tokens(tokens) => {tokens}
+            UnprocessedTokens::None => {return Err(MissingContextError)}
+            UnprocessedTokens::Text(text) => {self.tokenizer.encode(&text)}
         };
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_tokens[..], device);
         let (logits, next_layer_state) = rwkv.forward(input.unsqueeze(), self.last_layer_state.as_ref());
@@ -146,32 +159,33 @@ impl<B: Backend> ContextManager<B> {
         self.processed_tokens.extend(input_tokens);
         self.unprocessed_tokens = UnprocessedTokens::Logit(logits.squeeze::<2>(0).squeeze(0));
         self.last_layer_state = Some(next_layer_state);
+        Ok(())
     }
 
-    pub fn greedy_sample(&mut self) -> u16 {
-        let token = match &self.unprocessed_tokens {
+    pub fn greedy_sample(&mut self) -> Result<u16, ContextManagerError> {
+        let token = match std::mem::take(&mut self.unprocessed_tokens) {
             UnprocessedTokens::Logit(logit) => {
-                let output_token = softmax(logit.clone(), 0).argmax(0);
+                let output_token = softmax(logit, 0).argmax(0);
                 output_token.to_data().as_slice::<B::IntElem>().unwrap()[0].to_u16()
             }
-            UnprocessedTokens::Tokens(_) => {panic!()}
-            UnprocessedTokens::None => {panic!()}
-            UnprocessedTokens::Text(_) => {panic!()}
+            UnprocessedTokens::None|
+            UnprocessedTokens::Tokens(_) |
+            UnprocessedTokens::Text(_) => {return Err(MissingLogitError)}
         };
         self.unprocessed_tokens = UnprocessedTokens::Tokens(vec![token]);
-        token
+        Ok(token)
     }
 
-    pub fn sample(&mut self, sampler: &mut Sampler) -> u16 {
-        let (tensor, token) = match &self.unprocessed_tokens {
+    pub fn sample(&mut self, sampler: &mut Sampler) -> Result<u16, ContextManagerError> {
+        let (tensor, token) = match std::mem::take(&mut self.unprocessed_tokens) {
             UnprocessedTokens::Logit(logit) => {
-                sampler.rwkv_sample_single(logit.clone())
+                sampler.rwkv_sample_single(logit)
             }
-            UnprocessedTokens::Tokens(_) => {panic!()}
-            UnprocessedTokens::None => {panic!()}
-            UnprocessedTokens::Text(_) => {panic!()}
+            UnprocessedTokens::None|
+            UnprocessedTokens::Tokens(_) |
+            UnprocessedTokens::Text(_) => {return Err(MissingLogitError)}
         };
         self.unprocessed_tokens = UnprocessedTokens::Tokens(vec![token]);
-        token
+        Ok(token)
     }
 }

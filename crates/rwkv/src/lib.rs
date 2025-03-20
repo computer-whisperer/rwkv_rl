@@ -2,10 +2,6 @@ pub mod sampling;
 pub mod tokenizer;
 pub mod context_manager;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
 use burn::module::{Content, DisplaySettings, Module, ModuleDisplay, Param};
 use burn::nn::{Linear, LayerNorm, Sigmoid, Tanh, EmbeddingConfig, LayerNormConfig, LinearConfig, Initializer};
 use burn::prelude::{Tensor, Backend, Config, Device};
@@ -616,11 +612,32 @@ impl<B: Backend> Block<B> {
 
     fn forward(&self, layer_num: usize, x: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, s: Option<&LayerState<B>>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, LayerState<B>) {
         let num_tokens = x.dims()[1];
+
+        use burn::tensor::{set_print_options, PrintOptions};
+
+        let print_options = PrintOptions {
+            precision: Some(4),
+            threshold: 3000,
+            ..Default::default()
+        };
+
+        set_print_options(print_options);
+
+        println!("before ln0: {x}");
+        
         let x = if let Some(ln0) = &self.ln0 {
             ln0.forward(x)
         } else {
             x
         };
+        
+
+
+
+        
+        println!("after ln0: {x}");
+        panic!();
+
 
         let s: LayerState<B> = if let Some(s) = s {
             s.clone()
@@ -628,30 +645,30 @@ impl<B: Backend> Block<B> {
             LayerState::new_from_input(x.shape().dims[0], d_model, n_heads, &x.device())
         };
 
-        //println!("x: {x:?}");
+        println!("x: {x:?}");
         let x1 = self.ln1.forward(x.clone());
         let new_time_mixer_x_state: Tensor<B, 2> = if num_tokens > 1 {
             x1.clone().slice([None, Some((-2, -1))])
         } else {
             x1.clone()
         }.squeeze(1);
-        //println!("x1: {x1:?}");
+        println!("x1: {x1:?}");
         let (x2, new_v0, new_vk_state) = self.att.forward(x1.clone(), v0, s.time_mixer_x_state, s.vk_state, d_model, n_heads);
-        //println!("x2: {x2:?}");
+        println!("x2: {x2:?}");
         let x3 = x + x2;
-        //println!("x3: {x3:?}");
+        println!("x3: {x3:?}");
         let x4 = self.ln2.forward(x3.clone());
-        //println!("x4: {x4:?}");
+        println!("x4: {x4:?}");
         let new_channel_mixer_x_state: Tensor<B, 2> = if num_tokens > 1 {
             x4.clone().slice([None, Some((-2, -1))])
         } else {
             x4.clone()
         }.squeeze(1);
         let x5 = self.ffn.forward(x4.clone(), s.channel_mixer_x_state);
-        //println!("x5: {x5:?}");
+        println!("x5: {x5:?}");
 
         let x6 = x5 + x3;
-        //println!("x6: {x6:?}");
+        println!("x6: {x6:?}");
 
         //println!("layer: {layer_num:?}, time_mixer_x_state: {new_time_mixer_x_state:?},\n vk_state: {new_vk_state:?},\n channel_mixer_x_state: {new_channel_mixer_x_state:?}");
 
@@ -762,6 +779,8 @@ impl<B: Backend> RWKV7<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&Vec<LayerState<B>>>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
         let mut x = self.emb.forward(input);
 
+        println!("after emb: {x:?}");
+        
         let mut v0 = None;
         let mut new_channel_states = Vec::new();
         for (i, block) in self.blocks.iter().enumerate() {
@@ -772,15 +791,20 @@ impl<B: Backend> RWKV7<B> {
             };
             let (new_x, new_v0, new_channel_state) = block.forward(i, x, v0, channel_state, self.d_model, self.n_heads);
             x = new_x;
+            println!("after block {i}: {x:?}");
+            
+            if i > 0 {
+                panic!()
+            }
             v0 = Some(new_v0);
             new_channel_states.push(new_channel_state);
         }
 
-        //println!("x_a: {x:?}");
         let x = self.ln_out.forward(x);
-        //println!("x_b: {x:?}");
+        println!("after ln_out: {x:?}");
+        
+        
         let logits = self.head.forward(x);
-        //println!("logits: {logits:?}");
 
         (logits, new_channel_states)
     }
@@ -793,16 +817,5 @@ impl<B: Backend> RWKV7<B> {
         let (logits, new_channel_states) = self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states);
         let (new_token_tensor, new_token_value) = RWKV7::do_greedy_sample(logits.slice([0..1, (inputs.len()-1)..inputs.len()]));
         (new_token_tensor, new_token_value, new_channel_states)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
     }
 }

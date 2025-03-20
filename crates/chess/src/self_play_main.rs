@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::io::{stdin, stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

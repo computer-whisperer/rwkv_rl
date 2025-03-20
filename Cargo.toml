@@ -20,10 +20,11 @@ burn-import = {git="https://github.com/tracel-ai/burn", default-features=false, 
 #llama-burn = { path = "libs/models/llama-burn", package = "llama-burn", default-features=false }
 rwkv = {path="crates/rwkv"}
 rwkv-tokenizer = {path="libs/rwkv-tokenizer/rwkv-tokenizer"}
+half = "2.5.0"
 
 
 [workspace]
-members = ["crates/rwkv", "crates/rusty_bar", "crates/chess"]
+members = ["crates/rwkv", "crates/rusty_bar", "crates/chess", "crates/rwkv_test"]
 
 [features]
 wgpu = ["burn/wgpu"]
@@ -32,4 +33,4 @@ cuda = ["burn/cuda"]
 #candle = ["burn/candle"]
 vulkan = ["burn/vulkan"]
 fusion = ["burn/fusion"]
-#ndarray = ["burn/ndarray", "burn/openblas"]
+ndarray = ["burn/ndarray"]

@@ -10,7 +10,7 @@ use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
 use rwkv::RWKV7;
 
-use burn::record::{FullPrecisionSettings, Recorder};
+use burn::record::{FullPrecisionSettings, HalfPrecisionSettings, Recorder};
 use burn::tensor::{set_print_options, PrintOptions};
 use burn_import::pytorch::PyTorchFileRecorder;
 use rwkv_tokenizer::WorldTokenizer;
@@ -38,52 +38,65 @@ fn chat<B: Backend>(device: Device<B>) {
 
     //let tokenizer = Tokenizer::from_pretrained("RWKV/v6-Finch-1B6-HF", None).unwrap();
 
-    //let model_path = "/mnt/secondary/rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth";
-    let model_path = "/ceph-fuse/public/neural_models/llms/rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth";
+    let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth";
+    //let model_path = "/mnt/secondary/RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth";
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
     let rwkv = RWKV7::<B>::new(rwkv::RWKV7Config::rwkv_7_1b5(), &device);
     let rwkv = rwkv.load_record(record);
-    
-    
-    let mut context_manager = ContextManager::new(tokenizer.clone(), None);
-    let prompt = "Question: How many cats will fit in your average school bus?\n\nAnswer:";
-    context_manager.add_unprocessed_text(prompt);
 
-    println!("Processing prompt: {}", prompt);
-    
-    context_manager.rwkv_forward(&rwkv, &device);
 
-    let mut tokens = vec![];
-    let now = Instant::now();
-    let mut token_buffer = vec![];
-    for _ in 0..1000 {
-        let token = context_manager.greedy_sample();
-        token_buffer.push(token);
-        tokens.push(token);
-        /*
-        if let Ok(s) = tokenizer.decode(token_buffer.clone()) {
-            token_buffer.clear();
-            //eprint!("{s}");
-        }*/
-        context_manager.rwkv_forward(&rwkv, &device);
-        //print!("{}", tokenizer.decode(vec![token]));
+    if true
+    {
+        let mut context_manager = ContextManager::new(tokenizer.clone(), None);
+        let prompt = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
+        context_manager.add_tokens(&prompt);
+        context_manager.rwkv_forward(&rwkv, &device).unwrap();
     }
+    else {
+        let mut context_manager = ContextManager::new(tokenizer.clone(), None);
+        let prompt = "User: How many cats will fit in your average school bus?\n\nAssistant: <think";
+        context_manager.add_text(prompt).unwrap();
 
-    let elapsed = now.elapsed().as_secs();
-    println!(
-        "{} tokens processed ({:.4} tokens/s)\n",
-        tokens.len(),
-        tokens.len() as f32 / elapsed as f32
-    );
+        print!("Processing prompt: \n{}", prompt);
 
-    println!("{}", context_manager.decode_processed_tokens().unwrap());
+        context_manager.rwkv_forward(&rwkv, &device);
 
-    println!(
-        "Generation completed in {}m{}s",
-        (elapsed / 60),
-        elapsed % 60
-    );
+
+        let mut tokens = vec![];
+        let now = Instant::now();
+        let mut token_buffer = vec![];
+        for _ in 0..25 {
+            let token = context_manager.greedy_sample().unwrap();
+            token_buffer.push(token);
+            tokens.push(token);
+
+            if let Ok(s) = tokenizer.decode(token_buffer.clone()) {
+                token_buffer.clear();
+                print!("{s}");
+            }
+            context_manager.rwkv_forward(&rwkv, &device).unwrap();
+            //print!("{}", tokenizer.decode(vec![token]));
+        }
+
+        let elapsed = now.elapsed().as_secs();
+        println!(
+            "{} tokens processed ({:.4} tokens/s)\n",
+            tokens.len(),
+            tokens.len() as f32 / elapsed as f32
+        );
+
+        // println!("{}", context_manager.decode_processed_tokens().unwrap());
+
+        println!(
+            "Generation completed in {}m{}s",
+            (elapsed / 60),
+            elapsed % 60
+        );
+
+    }
+    
+    
 
 
 
@@ -136,7 +149,7 @@ mod cuda {
     pub fn run() {
         let device = CudaDevice::default();
 
-        chat::<Cuda>(device);
+        chat::<Cuda<f32, i32>>(device);
     }
 }
 
