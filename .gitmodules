@@ -3,7 +3,7 @@
 	url = https://github.com/beyond-all-reason/spring
 [submodule "libs/rwkv-tokenizer"]
 	path = libs/rwkv-tokenizer
-	url = https://github.com/computer-whisperer/rwkv-tokenizer
+	url = git@github.com:computer-whisperer/rwkv-tokenizer.git
 [submodule "libs/candle"]
     path = libs/candle
     url = https://github.com/computer-whisperer/candle
