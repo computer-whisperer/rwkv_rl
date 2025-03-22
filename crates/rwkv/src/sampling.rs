@@ -1,7 +1,7 @@
 use burn::tensor::{backend::Backend, Int, Tensor};
 use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
-use llm_samplers::prelude::{HasSamplerResources, Logits, NilSamplerResources, Sampler as LLMSampler, SamplerChain, SimpleSamplerResources};
+use llm_samplers::prelude::{HasSamplerResources, Logits, Sampler as LLMSampler, SamplerChain, SimpleSamplerResources};
 use rand::{
     distributions::{Distribution, WeightedIndex},
     rngs::StdRng,

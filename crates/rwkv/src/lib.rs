@@ -2,13 +2,89 @@ pub mod sampling;
 pub mod tokenizer;
 pub mod context_manager;
 
+#[cfg(test)]
+mod test_accuracy;
+
 use burn::module::{Content, DisplaySettings, Module, ModuleDisplay, Param};
-use burn::nn::{Linear, LayerNorm, Sigmoid, Tanh, EmbeddingConfig, LayerNormConfig, LinearConfig, Initializer};
+use burn::nn::{Linear, Sigmoid, Tanh, LinearConfig, Initializer};
 use burn::prelude::{Tensor, Backend, Config, Device};
 use burn::tensor::activation::{relu, sigmoid, softmax, softplus};
-use burn::tensor::{set_print_options, Int, PrintOptions};
+use burn::tensor::{Int, PrintOptions};
 use burn::tensor::cast::ToElement;
 use burn::tensor::module::embedding;
+
+
+#[derive(Debug, Config)]
+pub struct LayerNormConfig {
+    /// The size of the input features.
+    pub d_model: usize,
+    /// A value required for numerical stability. Default: 1e-5
+    #[config(default = 1e-5)]
+    pub epsilon: f64,
+}
+
+/// Applies Layer Normalization over an input tensor as described in the paper [Layer Normalization](https://arxiv.org/abs/1607.06450).
+///
+/// `Y = norm(X) * γ + β`
+///
+/// Where:
+/// - `X` is the input tensor
+/// - `Y` is the output tensor
+/// - `γ` is the learnable weight
+/// - `β` is the learnable bias
+///
+/// Should be created using [LayerNormConfig](LayerNormConfig).
+#[derive(Module, Debug)]
+pub struct LayerNorm<B: Backend> {
+    /// The learnable weight.
+    pub gamma: Param<Tensor<B, 1>>,
+    /// The learnable bias.
+    pub beta: Param<Tensor<B, 1>>,
+    /// A value required for numerical stability.
+    epsilon: f64,
+}
+
+impl LayerNormConfig {
+    /// Initialize a new [layer norm](LayerNorm) module.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> LayerNorm<B> {
+        let gamma = Initializer::Ones.init([self.d_model], device);
+        let beta = Initializer::Zeros.init([self.d_model], device);
+
+        LayerNorm {
+            gamma,
+            beta,
+            epsilon: self.epsilon,
+        }
+    }
+}
+
+impl<B: Backend> LayerNorm<B> {
+    /// Applies the forward pass on the input tensor.
+    ///
+    /// See the [LayerNorm](LayerNorm) documentation for more information.
+    ///
+    /// # Shapes
+    ///
+    /// - input: `[..., any, d_model]`
+    /// - output: `[..., any, d_model]`
+    pub fn forward<const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
+        let (var, mean) = input.clone().var_mean_bias(D - 1);
+        
+        //println!("var: {var}, mean: {mean}");
+        let rstd_val = Tensor::ones(var.shape(), &input.device()).div(var.add_scalar(self.epsilon).sqrt());
+        let scale = rstd_val.clone();
+        let bias = -rstd_val*mean;
+        //println!("scale: {scale}, bias: {bias}");
+        
+        let input_normalized = input.mul(scale).add(bias);
+
+        //println!("gamma: {}, bias: {}", self.gamma.val(), self.beta.val());
+
+        input_normalized
+            .mul(self.gamma.val().unsqueeze())
+            .add(self.beta.val().unsqueeze())
+    }
+}
 
 #[derive(Debug, Config)]
 pub struct GroupNormConfig {
@@ -284,10 +360,6 @@ fn normalize<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize, p: f32) ->
 }
 
 fn linear<B: Backend>(d_input: usize, d_output: usize, device: &B::Device) -> Linear<B> {
-    LinearConfig::new(d_input, d_output).with_bias(false).init(device)
-}
-
-fn linear_with_bias<B: Backend>(d_input: usize, d_output: usize, device: &B::Device) -> Linear<B> {
     LinearConfig::new(d_input, d_output).with_bias(false).init(device)
 }
 
@@ -585,8 +657,8 @@ impl<B: Backend> ChannelMixer<B> {
 }
 
 #[derive(burn::prelude::Module, Debug)]
-struct Block<B: Backend> {
-    ln0: Option<LayerNorm<B>>,
+pub struct Block<B: Backend> {
+    pub ln0: Option<LayerNorm<B>>,
     ln1: LayerNorm<B>,
     att: TimeMixer<B>,
     ln2: LayerNorm<B>,
@@ -610,7 +682,7 @@ impl<B: Backend> Block<B> {
         }
     }
 
-    fn forward(&self, layer_num: usize, x: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, s: Option<&LayerState<B>>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, LayerState<B>) {
+    fn forward(&self, _layer_num: usize, x: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, s: Option<&LayerState<B>>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, LayerState<B>) {
         let num_tokens = x.dims()[1];
 
         use burn::tensor::{set_print_options, PrintOptions};
@@ -622,8 +694,6 @@ impl<B: Backend> Block<B> {
         };
 
         set_print_options(print_options);
-
-        println!("before ln0: {x}");
         
         let x = if let Some(ln0) = &self.ln0 {
             ln0.forward(x)
@@ -631,46 +701,28 @@ impl<B: Backend> Block<B> {
             x
         };
         
-
-
-
-        
-        println!("after ln0: {x}");
-        panic!();
-
-
         let s: LayerState<B> = if let Some(s) = s {
             s.clone()
         } else {
             LayerState::new_from_input(x.shape().dims[0], d_model, n_heads, &x.device())
         };
-
-        println!("x: {x:?}");
         let x1 = self.ln1.forward(x.clone());
         let new_time_mixer_x_state: Tensor<B, 2> = if num_tokens > 1 {
             x1.clone().slice([None, Some((-2, -1))])
         } else {
             x1.clone()
         }.squeeze(1);
-        println!("x1: {x1:?}");
         let (x2, new_v0, new_vk_state) = self.att.forward(x1.clone(), v0, s.time_mixer_x_state, s.vk_state, d_model, n_heads);
-        println!("x2: {x2:?}");
         let x3 = x + x2;
-        println!("x3: {x3:?}");
         let x4 = self.ln2.forward(x3.clone());
-        println!("x4: {x4:?}");
         let new_channel_mixer_x_state: Tensor<B, 2> = if num_tokens > 1 {
             x4.clone().slice([None, Some((-2, -1))])
         } else {
             x4.clone()
         }.squeeze(1);
         let x5 = self.ffn.forward(x4.clone(), s.channel_mixer_x_state);
-        println!("x5: {x5:?}");
 
         let x6 = x5 + x3;
-        println!("x6: {x6:?}");
-
-        //println!("layer: {layer_num:?}, time_mixer_x_state: {new_time_mixer_x_state:?},\n vk_state: {new_vk_state:?},\n channel_mixer_x_state: {new_channel_mixer_x_state:?}");
 
         let new_s = LayerState {
             time_mixer_x_state: new_time_mixer_x_state,
@@ -739,12 +791,26 @@ impl RWKV7Config {
         }
     }
 
+    pub fn from_record<B: Backend>(record: &RWKV7Record<B>) -> Self {
+        let n_layers = record.blocks.len();
+        let s: [usize; 2] = record.emb.weight.shape().dims();
+        let vocab_size = s[0];
+        let d_model = s[1];
+        let s: [usize; 2] = record.blocks[0].att.r_k.shape().dims();
+        let n_heads = s[0];
+        RWKV7Config {
+            vocab_size,
+            d_model,
+            n_layers,
+            n_heads,
+        }
+    }
 }
 
 #[derive(burn::prelude::Module, Debug)]
 pub struct RWKV7<B: Backend> {
     emb: Embedding<B>,
-    blocks: Vec<Block<B>>,
+    pub blocks: Vec<Block<B>>,
     ln_out: LayerNorm<B>,
     head: Linear<B>,
     n_heads: usize,
@@ -779,7 +845,7 @@ impl<B: Backend> RWKV7<B> {
     pub fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&Vec<LayerState<B>>>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
         let mut x = self.emb.forward(input);
 
-        println!("after emb: {x:?}");
+        //println!("after emb: {x:?}");
         
         let mut v0 = None;
         let mut new_channel_states = Vec::new();
@@ -791,17 +857,17 @@ impl<B: Backend> RWKV7<B> {
             };
             let (new_x, new_v0, new_channel_state) = block.forward(i, x, v0, channel_state, self.d_model, self.n_heads);
             x = new_x;
-            println!("after block {i}: {x:?}");
+            //println!("after block {i}: {x:?}");
             
             if i > 0 {
-                panic!()
+                //panic!()
             }
             v0 = Some(new_v0);
             new_channel_states.push(new_channel_state);
         }
 
         let x = self.ln_out.forward(x);
-        println!("after ln_out: {x:?}");
+        //println!("after ln_out: {x:?}");
         
         
         let logits = self.head.forward(x);

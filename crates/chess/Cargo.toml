@@ -20,11 +20,9 @@ uci-parser = "1.1.0"
 shakmaty = "0.27.2"
 rwkv = {path = "../rwkv"}
 
-rwkv-tokenizer = {path="../../libs/rwkv-tokenizer/rwkv-tokenizer"}
-#burn = {version="0.16.0", default-features=false }
-#burn-import = {version="0.16.0", default-features=false, features=["pytorch"] }
-burn = {git="https://github.com/tracel-ai/burn", default-features=false }
-burn-import = {git="https://github.com/tracel-ai/burn", default-features=false, features=["pytorch"] }
+rwkv-tokenizer = {workspace = true}
+burn = {workspace=true, default-features=false }
+burn-import = {workspace=true, default-features=false, features=["pytorch"] }
 rand = "0.8.5"
 llm-samplers = "0.0.7"
 

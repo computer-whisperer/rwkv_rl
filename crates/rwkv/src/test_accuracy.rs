@@ -3,15 +3,17 @@ use std::time::Instant;
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
 use pyo3::prelude::*;
-use pyo3::types::{IntoPyDict, PyTuple, PyAny};
+use pyo3::types::{IntoPyDict, PyAny};
 use pyo3::ffi::c_str;
 use burn::prelude::{Backend, Device, Int, Module, Tensor};
-use rwkv::RWKV7;
+use crate::RWKV7;
 
 fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
-    //let input_tokens = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
-    let input_tokens = [510];
-    let model_path = Path::new("/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
+    let input_tokens = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
+    //let input_tokens = [510];
+    //let model_path = Path::new("/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth");
+    let model_path = Path::new("/mnt/secondary/rwkv7-g1/rwkv7-g1-0.1b-20250307-ctx4096.pth");
+    //let model_path = Path::new("/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
     //let model_path = Path::new("/mnt/secondary/RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth");
     //let model_path = Path::new("/mnt/secondary/rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth");
 
@@ -19,7 +21,8 @@ fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
     let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_tokens[..], &device);
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.to_str().unwrap().into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(rwkv::RWKV7Config::rwkv_7_1b5(), &device);
+    //let rwkv = RWKV7::<B>::new(rwkv::RWKV7Config::rwkv_7_1b5(), &device);
+    let rwkv = RWKV7::<B>::new(crate::RWKV7Config::from_record(&record), &device);
     let rwkv = rwkv.load_record(record);
 
 
@@ -45,15 +48,15 @@ fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
         input_tokens.len(),
         input_tokens.len() as f32 / elapsed as f32
     );
-    
+
     println!("Running python version:");
 
     let (python_logits_output, python_state_output): (Vec<Vec<f32>>, ()) = Python::with_gil(|py| {
         let path_converted = model_path.to_str().unwrap();
         let locals = [("os", py.import("os")?), ("sys", py.import("sys")?)].into_py_dict(py)?;
-        py.eval(c_str!("sys.path.append(\"crates/rwkv_test/src/\")"), None, Some(&locals))?;
-        py.eval(c_str!("sys.path.append(\"crates/rwkv_test/libs/RWKV-block\")"), None, Some(&locals))?;
-        let model = py.import("stuff")?.call_method1("load_model", (path_converted,))?;
+        py.eval(c_str!("sys.path.append(\"src\")"), None, Some(&locals))?;
+        py.eval(c_str!("sys.path.append(\"../../libs/RWKV-block\")"), None, Some(&locals))?;
+        let model = py.import("load_rwkv_block")?.call_method1("load_model", (path_converted,))?;
 
         let in_state = model.call_method1("get_init_state", (1,))?;
         let out_state = model.call_method1("get_init_state",(1,))?;
@@ -82,6 +85,7 @@ fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
     })?;
 
     // Compare outputs
+    let mut token_diffs = vec![];
     for (i, (logit, python_logit)) in output_logits.iter().zip(python_logits_output.iter()).enumerate() {
         // Calculate average difference
         let mut avg_diff = 0.0;
@@ -89,7 +93,12 @@ fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
             avg_diff += (l - p).abs();
         }
         avg_diff /= logit.len() as f32;
+        token_diffs.push(avg_diff);
         println!("Token {}: avg diff = {:.4}", i, avg_diff);
+    }
+    
+    for diff in token_diffs {
+        assert!(diff < 0.1);
     }
 
     Ok(())
@@ -172,18 +181,37 @@ mod ndarray {
 }
 
 
-
-pub fn main() {
+#[test]
+pub fn test_accuracy() {
     #[cfg(feature = "wgpu")]
-    wgpu::run();
+    {
+        wgpu::run();
+        return;
+    }
     #[cfg(feature = "cuda")]
-    cuda::run();
+    {
+        cuda::run();
+        return;
+    }
     #[cfg(feature = "hip")]
-    hip::run();
+    {
+        hip::run();
+        return;
+    }
     #[cfg(feature = "candle")]
-    candle::run();
+    {
+        candle::run();
+        return;
+    }
     #[cfg(feature = "vulkan")]
-    vulkan::run();
+    {
+        vulkan::run();
+        return;
+    }
     #[cfg(feature = "ndarray")]
-    ndarray::run();
+    {
+        ndarray::run();
+        return;
+    }
+    assert_eq!(false, true);
 }

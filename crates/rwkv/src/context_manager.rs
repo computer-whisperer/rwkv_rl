@@ -1,6 +1,5 @@
 use std::str::Utf8Error;
 use std::sync::Arc;
-use burn::nn::loss::CrossEntropyLoss;
 use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
@@ -77,7 +76,7 @@ impl<B: Backend> ContextManager<B> {
     pub fn decode_processed_and_unprocessed_tokens(&mut self) -> Result<String, Utf8Error> {
         let processed_str = self.decode_processed_tokens()?.to_string();
         let unprocessed_string = match &self.unprocessed_tokens {
-            UnprocessedTokens::Logit(logit) => {
+            UnprocessedTokens::Logit(_logit) => {
                 String::new()
             }
             UnprocessedTokens::Tokens(tokens) => {
@@ -123,7 +122,7 @@ impl<B: Backend> ContextManager<B> {
     pub fn get_score(&self, rwkv: &RWKV7<B>, text: &str, device: &Device<B>) -> f32 {
         let tokens = self.tokenizer.encode(text);
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], device);
-        let (logits, next_layer_state) = rwkv.forward(input.clone().unsqueeze(), self.last_layer_state.as_ref());
+        let (logits, _next_layer_state) = rwkv.forward(input.clone().unsqueeze(), self.last_layer_state.as_ref());
         let mut values = vec![];
         let mut sum = 0f32;
         for i in 0..tokens.len() - 2 {
@@ -177,7 +176,7 @@ impl<B: Backend> ContextManager<B> {
     }
 
     pub fn sample(&mut self, sampler: &mut Sampler) -> Result<u16, ContextManagerError> {
-        let (tensor, token) = match std::mem::take(&mut self.unprocessed_tokens) {
+        let (_tensor, token) = match std::mem::take(&mut self.unprocessed_tokens) {
             UnprocessedTokens::Logit(logit) => {
                 sampler.rwkv_sample_single(logit)
             }

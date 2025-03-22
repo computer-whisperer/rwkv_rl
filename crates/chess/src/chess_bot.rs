@@ -99,9 +99,10 @@ impl<B: Backend> ChessBot<B> {
         
         // Ask the llm
         let board = current_position.board().clone();
-        let board_str = board.board_fen(current_position.promoted()).to_string();
-        let processed_board_str = if false {
-            board_str.replace("P", "♙")
+       
+        let (processed_board_str, board_format_explain) = if false {
+            let board_str = board.board_fen(current_position.promoted()).to_string();
+            (board_str.replace("P", "♙")
             .replace("p", "♟")
             .replace("R", "♖")
             .replace("r", "♜")
@@ -112,34 +113,31 @@ impl<B: Backend> ChessBot<B> {
             .replace("Q", "♕")
             .replace("q", "♛")
             .replace("K", "♔")
-            .replace("k", "♚")
+            .replace("k", "♚"),
+             "(in black/white unicode chess symbols (♟♙♜♖♞♘♝♗♛♕♚♔))")
         } else {
-            board_str
+            (board.board_fen(current_position.promoted()).to_string(), "(in FEN notation, so the white pieces are represented by P: pawn, R: rook, N: knight, B: bishop, Q: queen, K: king, and the black pieces by p: pawn, r: rook, n: knight, b: bishop, q: queen, k: king)")
         };
+        let current_color_to_move = current_position.turn();
         let prompt = if move_str_parts.is_empty() {
-            format!("User: We are playing chess against an opponent! We are playing {}, we are the first to move, and the current board state (in FEN notation, so lowercase is black and uppercase is white) is {}. Please think carefully and then provide our first move in algebraic format.\n\nAssistant: <think>",
-                                 current_position.turn(),
-                                processed_board_str
-            )
+            format!("User: We are playing chess against an opponent! We are playing {current_color_to_move}, we are the first to move, and the current board state {board_format_explain} is {processed_board_str}. Please think carefully and then provide our first move in algebraic format.\n\nAssistant: <think>", )
         } else {
-            format!("User: We are playing chess against an opponent! We are playing {}, the previous moves so far are: [{}], and the current board state (in FEN notation, so lowercase is black and uppercase is white) is {}. Please think carefully and then provide our next move in algebraic format.\n\nAssistant: <think>",
-                                 current_position.turn(),
-                                 move_str_parts.join(" "),
-                                 processed_board_str,
-            )
+            let combined_move_str = move_str_parts.join(" ");
+            format!("User: We are playing chess against an opponent! We are playing {current_color_to_move}, the previous moves so far are: [{combined_move_str}], and the current board state {board_format_explain} is {processed_board_str}. Please think carefully and then provide our next move in algebraic format.\n\nAssistant: <think>", )
         };
         
         eprint!("\n\n{prompt}");
-        self.context_manager.add_unprocessed_text(&prompt);
-        self.context_manager.rwkv_forward(self.rwkv.as_ref(), &self.device);
+        let mut turn_context_manager = ContextManager::new_from_previous_context(&self.context_manager);
+        turn_context_manager.add_text(&prompt);
+        turn_context_manager.rwkv_forward(self.rwkv.as_ref(), &self.device);
 
-        let mut thinking_context = ContextManager::new_from_previous_context(&self.context_manager);
+        let mut thinking_context = ContextManager::new_from_previous_context(&turn_context_manager);
 
         let max_thinking_tokens = 800;
 
         let mut token_buffer = vec![];
         for _ in 0..max_thinking_tokens {
-            let new_token = thinking_context.sample(&mut self.sampler);
+            let new_token = thinking_context.sample(&mut self.sampler).unwrap();
             token_buffer.push(new_token);
             if let Ok(s) = self.tokenizer.decode(token_buffer.clone()) {
                 token_buffer.clear();
@@ -156,18 +154,18 @@ impl<B: Backend> ChessBot<B> {
         }
         if let Ok(decoded_str) = thinking_context.decode_processed_tokens() {
             if !decoded_str.contains("</think>") {
-                thinking_context.add_unprocessed_text("</think>\n");
+                thinking_context.add_text("</think>\n");
                 thinking_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
             }
         }
 
-        self.context_manager.add_new_context(&thinking_context);
+        turn_context_manager.add_new_context(&thinking_context);
 
 
         let (chosen_move, is_move_chosen) = if true {
-            let mut move_context = ContextManager::new_from_previous_context(&self.context_manager);
-            move_context.add_unprocessed_text("Our next move should");
-            move_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
+            let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
+            move_context.add_text("Our next move should").unwrap();
+            move_context.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
 
             let legal_moves = current_position.legal_moves();
 
@@ -190,8 +188,8 @@ impl<B: Backend> ChessBot<B> {
             }
             (best_move.unwrap().0, true)
         } else {
-            let mut move_context = ContextManager::new_from_previous_context(&self.context_manager);
-            move_context.add_unprocessed_text("Our next move should be");
+            let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
+            move_context.add_text("Our next move should be");
             move_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
             let mut move_context = ContextManager::new_from_previous_context(&move_context);
 
@@ -226,7 +224,11 @@ impl<B: Backend> ChessBot<B> {
 
 
         // Re-write last layer state to include only the move that was chosen
-        self.context_manager.add_unprocessed_text(&format!("Our next move should be {}\n\n", San::from_move(&current_position, &chosen_move)));
+        turn_context_manager.add_text(&format!("Our next move should be {}\n\n", San::from_move(&current_position, &chosen_move)));
+        
+        if false {
+            self.context_manager.add_new_context(&turn_context_manager);
+        }
 
         eprintln!("Chosen Move: {}", San::from_move(&current_position, &chosen_move));
 

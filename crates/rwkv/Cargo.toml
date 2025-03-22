@@ -3,11 +3,25 @@ name = "rwkv"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "simple_gen"
+path = "src/simple_gen.rs"
+
 [dependencies]
-#burn = {version="0.16.0", default-features=false }
-burn = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-import = {workspace=true, default-features=false, features=["pytorch"] }
+burn = {workspace = true, default-features=false }
 rand = "0.8.5"
 llm-samplers = "0.0.7"
-rwkv-tokenizer = {path="../../libs/rwkv-tokenizer/rwkv-tokenizer"}
+rwkv-tokenizer = {workspace = true}
 
-[test-dependencies]
+[dev-dependencies]
+pyo3 = {version = "0.24.0", features = ["auto-initialize"]}
+
+[features]
+wgpu = ["burn/wgpu"]
+#hip = ["burn/hip"]
+#cuda = ["burn/cuda-jit"]
+#candle = ["burn/candle"]
+vulkan = ["burn/vulkan"]
+fusion = ["burn/fusion"]
+ndarray = ["burn/ndarray", "burn/openblas"]

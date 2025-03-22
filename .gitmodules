@@ -5,5 +5,5 @@
 	path = libs/rwkv-tokenizer
 	url = https://github.com/computer-whisperer/rwkv-tokenizer
 [submodule "crates/rwkv_test/libs/RWKV-block"]
-	path = crates/rwkv_test/libs/RWKV-block
+	path = libs/RWKV-block
 	url = https://github.com/RWKV/RWKV-block

@@ -587,8 +587,6 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ccf5ee3532e66868516d9b315f73aec9f34ea1a37ae98514534d458915dbf1"
 dependencies = [
  "byteorder",
  "gemm 0.17.1",
@@ -3310,7 +3308,9 @@ name = "rwkv"
 version = "0.1.0"
 dependencies = [
  "burn",
+ "burn-import",
  "llm-samplers",
+ "pyo3",
  "rand 0.8.5",
  "rwkv-tokenizer",
 ]
