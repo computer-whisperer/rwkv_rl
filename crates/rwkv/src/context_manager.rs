@@ -27,7 +27,7 @@ pub enum ContextManagerError {
 pub struct ContextManager<B: Backend> {
     processed_tokens: Vec<u16>,
     unprocessed_tokens: UnprocessedTokens<B>,
-    initial_layer_state: Option<Vec<LayerState<B>>>,
+    _initial_layer_state: Option<Vec<LayerState<B>>>,
     last_layer_state: Option<Vec<LayerState<B>>>,
     tokenizer: Arc<WorldTokenizer>,
     decoded_text: String,
@@ -39,7 +39,7 @@ impl<B: Backend> ContextManager<B> {
         Self {
             processed_tokens: Vec::new(),
             unprocessed_tokens: UnprocessedTokens::None,
-            initial_layer_state,
+            _initial_layer_state: initial_layer_state,
             last_layer_state: None,
             tokenizer,
             decoded_text: String::new(),
@@ -51,7 +51,7 @@ impl<B: Backend> ContextManager<B> {
         Self {
             processed_tokens: vec!(),
             unprocessed_tokens: previous_context.unprocessed_tokens.clone(),
-            initial_layer_state: previous_context.last_layer_state.clone(),
+            _initial_layer_state: previous_context.last_layer_state.clone(),
             last_layer_state: previous_context.last_layer_state.clone(),
             tokenizer: previous_context.tokenizer.clone(),
             decoded_text: String::new(),

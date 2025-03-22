@@ -1,21 +1,15 @@
 #![recursion_limit = "256"]
 
-use std::fs::File;
-use std::io::{BufReader, Read, Write};
 use std::sync::Arc;
 use std::time::Instant;
 use burn::module::Module;
-use burn::prelude::{Backend, Device, Int, Tensor};
-use burn::tensor::activation::softmax;
-use burn::tensor::cast::ToElement;
+use burn::prelude::{Backend, Device};
 use rwkv::RWKV7;
 
-use burn::record::{FullPrecisionSettings, HalfPrecisionSettings, Recorder};
-use burn::tensor::{set_print_options, PrintOptions};
+use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
-use rwkv::sampling::{Sampler, TopP};
 
 fn chat<B: Backend>(device: Device<B>) {
 
@@ -28,18 +22,18 @@ fn chat<B: Backend>(device: Device<B>) {
     let rwkv = rwkv.load_record(record);
 
     let mut context_manager = ContextManager::new(tokenizer.clone(), None);
-    let prompt = "User: How many cats will fit in your average school bus?\n\nAssistant: <think";
+    let prompt = "User: How many cats will fit in your average school bus?\n\nAssistant: <think>\nAlright";
     context_manager.add_text(prompt).unwrap();
 
     print!("Processing prompt: \n{}", prompt);
 
-    context_manager.rwkv_forward(&rwkv, &device);
+    context_manager.rwkv_forward(&rwkv, &device).unwrap();
 
 
     let mut tokens = vec![];
     let now = Instant::now();
     let mut token_buffer = vec![];
-    for _ in 0..25 {
+    for _ in 0..1000 {
         let token = context_manager.greedy_sample().unwrap();
         token_buffer.push(token);
         tokens.push(token);
@@ -51,7 +45,7 @@ fn chat<B: Backend>(device: Device<B>) {
         context_manager.rwkv_forward(&rwkv, &device).unwrap();
     }
 
-    let elapsed = now.elapsed().as_secs();
+    let elapsed = now.elapsed().as_secs_f32();
     println!(
         "\n{} tokens processed ({:.4} tokens/s)\n",
         tokens.len(),
@@ -60,8 +54,8 @@ fn chat<B: Backend>(device: Device<B>) {
 
     println!(
         "Generation completed in {}m{}s",
-        (elapsed / 60),
-        elapsed % 60
+        (elapsed / 60.0) as u32,
+        (elapsed % 60.0) as u32
     );
 
 }

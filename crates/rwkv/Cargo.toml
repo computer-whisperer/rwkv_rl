@@ -1,7 +1,7 @@
 [package]
 name = "rwkv"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "simple_gen"
@@ -19,9 +19,9 @@ pyo3 = {version = "0.24.0", features = ["auto-initialize"]}
 
 [features]
 wgpu = ["burn/wgpu"]
-#hip = ["burn/hip"]
-#cuda = ["burn/cuda-jit"]
-#candle = ["burn/candle"]
+hip = ["burn/hip"]
+cuda = ["burn/cuda"]
+candle = ["burn/candle"]
 vulkan = ["burn/vulkan"]
 fusion = ["burn/fusion"]
 ndarray = ["burn/ndarray", "burn/openblas"]

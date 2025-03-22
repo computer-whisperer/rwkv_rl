@@ -1,5 +1,6 @@
+#![recursion_limit = "256"]
+
 pub mod sampling;
-pub mod tokenizer;
 pub mod context_manager;
 
 #[cfg(test)]
@@ -9,7 +10,7 @@ use burn::module::{Content, DisplaySettings, Module, ModuleDisplay, Param};
 use burn::nn::{Linear, Sigmoid, Tanh, LinearConfig, Initializer};
 use burn::prelude::{Tensor, Backend, Config, Device};
 use burn::tensor::activation::{relu, sigmoid, softmax, softplus};
-use burn::tensor::{Int, PrintOptions};
+use burn::tensor::{Int};
 use burn::tensor::cast::ToElement;
 use burn::tensor::module::embedding;
 
@@ -700,7 +701,7 @@ impl<B: Backend> Block<B> {
         } else {
             x
         };
-        
+
         let s: LayerState<B> = if let Some(s) = s {
             s.clone()
         } else {

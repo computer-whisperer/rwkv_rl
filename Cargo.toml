@@ -2,8 +2,9 @@
 candle-core = { path="libs/candle/candle-core" }
 
 [workspace]
-members = ["crates/rwkv", "crates/rusty_bar", "crates/chess", "crates/rwkv_test"]
-exclude = ["libs/*", "libs/candle/candle-core/"]
+members = ["crates/rwkv", "crates/rusty_bar", "crates/chess"]
+exclude = ["libs"]
+resolver = "3"
 
 [workspace.dependencies]
 burn = {git="https://github.com/tracel-ai/burn", default-features=false }
