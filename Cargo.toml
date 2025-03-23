@@ -7,6 +7,6 @@ exclude = ["libs"]
 resolver = "3"
 
 [workspace.dependencies]
-burn = {git="https://github.com/tracel-ai/burn", default-features=false }
-burn-import = {git="https://github.com/tracel-ai/burn", default-features=false, features=["pytorch"] }
+burn = {path="libs/burn/crates/burn", default-features=false }
+burn-import = {path="libs/burn/crates/burn-import", default-features=false, features=["pytorch"] }
 rwkv-tokenizer = {path="libs/rwkv-tokenizer/rwkv-tokenizer"}

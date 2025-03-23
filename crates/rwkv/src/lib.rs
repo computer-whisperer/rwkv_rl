@@ -6,263 +6,15 @@ pub mod context_manager;
 #[cfg(test)]
 mod test_accuracy;
 
-use burn::module::{Content, DisplaySettings, Module, ModuleDisplay, Param};
-use burn::nn::{Linear, Sigmoid, Tanh, LinearConfig, Initializer};
-use burn::prelude::{Tensor, Backend, Config, Device};
+use burn::module::{Param};
+use burn::nn::{Linear, Sigmoid, Tanh, LinearConfig, Initializer, LayerNorm, LayerNormConfig, GroupNormConfig, GroupNorm};
+use burn::nn::loss::CrossEntropyLoss;
+use burn::prelude::{Tensor, Backend, Device};
 use burn::tensor::activation::{relu, sigmoid, softmax, softplus};
 use burn::tensor::{Int};
 use burn::tensor::cast::ToElement;
+use burn::tensor::DType::F32;
 use burn::tensor::module::embedding;
-
-
-#[derive(Debug, Config)]
-pub struct LayerNormConfig {
-    /// The size of the input features.
-    pub d_model: usize,
-    /// A value required for numerical stability. Default: 1e-5
-    #[config(default = 1e-5)]
-    pub epsilon: f64,
-}
-
-/// Applies Layer Normalization over an input tensor as described in the paper [Layer Normalization](https://arxiv.org/abs/1607.06450).
-///
-/// `Y = norm(X) * γ + β`
-///
-/// Where:
-/// - `X` is the input tensor
-/// - `Y` is the output tensor
-/// - `γ` is the learnable weight
-/// - `β` is the learnable bias
-///
-/// Should be created using [LayerNormConfig](LayerNormConfig).
-#[derive(Module, Debug)]
-pub struct LayerNorm<B: Backend> {
-    /// The learnable weight.
-    pub gamma: Param<Tensor<B, 1>>,
-    /// The learnable bias.
-    pub beta: Param<Tensor<B, 1>>,
-    /// A value required for numerical stability.
-    epsilon: f64,
-}
-
-impl LayerNormConfig {
-    /// Initialize a new [layer norm](LayerNorm) module.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> LayerNorm<B> {
-        let gamma = Initializer::Ones.init([self.d_model], device);
-        let beta = Initializer::Zeros.init([self.d_model], device);
-
-        LayerNorm {
-            gamma,
-            beta,
-            epsilon: self.epsilon,
-        }
-    }
-}
-
-impl<B: Backend> LayerNorm<B> {
-    /// Applies the forward pass on the input tensor.
-    ///
-    /// See the [LayerNorm](LayerNorm) documentation for more information.
-    ///
-    /// # Shapes
-    ///
-    /// - input: `[..., any, d_model]`
-    /// - output: `[..., any, d_model]`
-    pub fn forward<const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
-        let (var, mean) = input.clone().var_mean_bias(D - 1);
-        
-        //println!("var: {var}, mean: {mean}");
-        let rstd_val = Tensor::ones(var.shape(), &input.device()).div(var.add_scalar(self.epsilon).sqrt());
-        let scale = rstd_val.clone();
-        let bias = -rstd_val*mean;
-        //println!("scale: {scale}, bias: {bias}");
-        
-        let input_normalized = input.mul(scale).add(bias);
-
-        //println!("gamma: {}, bias: {}", self.gamma.val(), self.beta.val());
-
-        input_normalized
-            .mul(self.gamma.val().unsqueeze())
-            .add(self.beta.val().unsqueeze())
-    }
-}
-
-#[derive(Debug, Config)]
-pub struct GroupNormConfig {
-    /// The number of groups to separate the channels into
-    pub num_groups: usize,
-    /// The number of channels expected in the input
-    pub num_channels: usize,
-    /// A value required for numerical stability. Default: 1e-5
-    #[config(default = 1e-5)]
-    pub epsilon: f64,
-    /// A boolean value that when set to `true`, this module has learnable
-    /// per-channel affine parameters initialized to ones (for weights)
-    /// and zeros (for biases). Default: `true`
-    #[config(default = true)]
-    pub affine: bool,
-}
-
-/// Applies Group Normalization over a mini-batch of inputs as described in the paper [Group Normalization](https://arxiv.org/abs/1803.08494).
-///
-/// `Y = groupnorm(X) * γ + β`
-///
-/// Where:
-/// - `X` is the input tensor
-/// - `Y` is the output tensor
-/// - `γ` is the learnable weight
-/// - `β` is the learnable bias
-///
-/// Should be created using [GroupNormConfig](GroupNormConfig).
-#[derive(Module, Debug)]
-#[module(custom_display)]
-pub struct GroupNorm<B: Backend> {
-    /// The learnable weight
-    pub gamma: Option<Param<Tensor<B, 1>>>,
-    /// The learnable bias
-    pub beta: Option<Param<Tensor<B, 1>>>,
-    /// The number of groups to separate the channels into
-    pub num_groups: usize,
-    /// The number of channels expected in the input
-    pub num_channels: usize,
-    /// A value required for numerical stability
-    pub epsilon: f64,
-    /// A boolean value that when set to `true`, this module has learnable
-    pub affine: bool,
-}
-
-impl<B: Backend> ModuleDisplay for GroupNorm<B> {
-    fn custom_settings(&self) -> Option<DisplaySettings> {
-        DisplaySettings::new()
-            .with_new_line_after_attribute(false)
-            .optional()
-    }
-
-    fn custom_content(&self, content: Content) -> Option<Content> {
-        content
-            .add("num_groups", &self.num_groups)
-            .add("num_channels", &self.num_channels)
-            .add("epsilon", &self.epsilon)
-            .add("affine", &self.affine)
-            .optional()
-    }
-}
-
-impl GroupNormConfig {
-    /// Initialize a new [group norm](GroupNorm) module.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> GroupNorm<B> {
-        assert_eq!(
-            self.num_channels % self.num_groups,
-            0,
-            "The number of channels must be divisible by the number of groups"
-        );
-
-        let (gamma, beta) = if self.affine {
-            let gamma = Initializer::Ones.init([self.num_channels], device);
-            let beta = Initializer::Zeros.init([self.num_channels], device);
-
-            (Some(gamma), Some(beta))
-        } else {
-            (None, None)
-        };
-
-        GroupNorm {
-            num_groups: self.num_groups,
-            num_channels: self.num_channels,
-            gamma,
-            beta,
-            epsilon: self.epsilon,
-            affine: self.affine,
-        }
-    }
-}
-
-impl<B: Backend> GroupNorm<B> {
-    /// Applies the forward pass on the input tensor.
-    ///
-    /// See [GroupNorm](GroupNorm) for more information.
-    ///
-    /// # Shapes
-    ///
-    /// - input: `[batch_size, num_channels, *]`
-    /// - output: `[batch_size, num_channels, *]`
-    pub fn forward<const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
-        if input.shape().dims[1] != self.num_channels {
-            panic!(
-                "The number of channels in the input tensor should be equal to the number of channels in the GroupNorm module. Expected {}, got {}",
-                self.num_channels,
-                input.shape().dims[1]
-            );
-        }
-
-        let gamma = self.gamma.as_ref().map(|x| x.val());
-        let beta = self.beta.as_ref().map(|x| x.val());
-
-        group_norm(
-            input,
-            gamma,
-            beta,
-            self.num_groups,
-            self.epsilon,
-            self.affine,
-        )
-    }
-}
-
-/// Applies Group Normalization over a mini-batch of inputs as described in the paper [Group Normalization](https://arxiv.org/abs/1803.08494).
-///
-/// `Y = groupnorm(X) * γ + β`
-///
-/// Where:
-/// - `X` is the input tensor
-/// - `Y` is the output tensor
-/// - `γ` is the learnable weight
-/// - `β` is the learnable bias
-///
-pub(crate) fn group_norm<B: Backend, const D: usize>(
-    input: Tensor<B, D>,
-    gamma: Option<Tensor<B, 1>>,
-    beta: Option<Tensor<B, 1>>,
-    num_groups: usize,
-    epsilon: f64,
-    affine: bool,
-) -> Tensor<B, D> {
-    if (beta.is_none() || gamma.is_none()) && affine {
-        panic!("Affine is set to true, but gamma or beta is None");
-    }
-
-    let shape = input.shape();
-    if shape.num_elements() <= 2 {
-        panic!(
-            "input rank for GroupNorm should be at least 3, but got {}",
-            shape.num_elements()
-        );
-    }
-
-    let batch_size = shape.dims[0];
-    let num_channels = shape.dims[1];
-
-    let hidden_size = shape.dims[2..].iter().product::<usize>() * num_channels / num_groups;
-    let input = input.reshape([batch_size, num_groups, hidden_size]);
-
-    let mean = input.clone().sum_dim(2) / hidden_size as f64;
-    let input = input.sub(mean);
-
-    let var = input.clone().powf_scalar(2.).sum_dim(2) / hidden_size as f64;
-    let input_normalized = input.div(var.add_scalar(epsilon).sqrt());
-
-    if affine {
-        let mut affine_shape = [1; D];
-        affine_shape[1] = num_channels;
-
-        input_normalized
-            .reshape(shape)
-            .mul(gamma.clone().unwrap().reshape(affine_shape))
-            .add(beta.clone().unwrap().reshape(affine_shape))
-    } else {
-        input_normalized.reshape(shape)
-    }
-}
 
 #[derive(burn::prelude::Module, Debug)]
 struct Embedding<B: Backend> {
@@ -486,7 +238,7 @@ impl <B: Backend> TimeMixer<B> {
 
         let gate = lora_forward_sigmoid(self.g1.val(), self.g2.val(), None, x_gate);
 
-        let log_neglog_of_decay = lora_forward_tanh(self.w1.val(), self.w2.val(), Some(self.w0.val()), x_decay);
+        let log_neglog_of_decay = lora_forward_tanh(self.w1.val(), self.w2.val(), Some(self.w0.val()), x_decay).cast(F32);
         let log_neglog_of_decay = (- softplus(-log_neglog_of_decay, 1.0)).add_scalar(-0.5);
         let log_of_decay = -log_neglog_of_decay.exp();
         let decay = log_of_decay.exp();
@@ -572,6 +324,8 @@ impl <B: Backend> TimeMixer<B> {
         let d_heads = vk_state.dims()[1];
         let d_value = vk_state.dims()[2];
         let d_key = vk_state.dims()[3];
+        
+        let input_dtype = r.dtype();
 
         assert_eq!(r.dims()[0], d_batch);
         assert_eq!(r.dims()[1], d_heads);
@@ -598,15 +352,16 @@ impl <B: Backend> TimeMixer<B> {
         assert_eq!(deformed_key.dims()[2], d_key);
 
         // transform inputs from BHK into column vectors BHK1, and put everything in float format for higher precision
-
-        // TODO: to_full_precision() doesn't appear to exist, but should be used here
+        
+        let vk_state = vk_state.cast(F32);
+        
         let d = 3;
-        let r = r.unsqueeze_dim(d);
-        let k = k.unsqueeze_dim(d);
-        let v = v.unsqueeze_dim(d);
-        let decay = decay.unsqueeze_dim(d);
-        let iclr = iclr.unsqueeze_dim(d);
-        let deformed_key = deformed_key.unsqueeze_dim(d);
+        let r = r.unsqueeze_dim(d).cast(F32);
+        let k = k.unsqueeze_dim(d).cast(F32);
+        let v = v.unsqueeze_dim(d).cast(F32);
+        let decay = decay.unsqueeze_dim(d).cast(F32);
+        let iclr = iclr.unsqueeze_dim(d).cast(F32);
+        let deformed_key = deformed_key.unsqueeze_dim(d).cast(F32);
 
         // decay the kv state and remove the iclr amount of the value stored within the state at the deformed key
         let t_decay = decay.transpose();
@@ -620,7 +375,7 @@ impl <B: Backend> TimeMixer<B> {
         let out = vk_state.clone().matmul(r);
 
         // Remove extra useless dimension from the output
-        (out.squeeze(3), vk_state)
+        (out.squeeze(3).cast(input_dtype), vk_state.cast(input_dtype))
     }
 }
 
@@ -884,5 +639,15 @@ impl<B: Backend> RWKV7<B> {
         let (logits, new_channel_states) = self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states);
         let (new_token_tensor, new_token_value) = RWKV7::do_greedy_sample(logits.slice([0..1, (inputs.len()-1)..inputs.len()]));
         (new_token_tensor, new_token_value, new_channel_states)
+    }
+    
+    pub fn get_loss(&self, input_tokens: Tensor<B, 1, Int>, input_state: Option<&Vec<LayerState<B>>>, device: &Device<B>) -> Tensor<B, 1> {
+        let num_tokens = input_tokens.shape().dims[0];
+        let expected_values = input_tokens.clone().slice([1..num_tokens]);
+        
+        let (logits, next_layer_state) = self.forward(input_tokens.clone().unsqueeze::<2>(), input_state);
+        let testable_logits = logits.squeeze(0).slice([0..num_tokens-1]);
+
+        CrossEntropyLoss::new(None, device).forward(testable_logits, expected_values.clone())
     }
 }

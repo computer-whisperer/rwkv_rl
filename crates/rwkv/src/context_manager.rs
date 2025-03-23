@@ -20,7 +20,8 @@ pub enum UnprocessedTokens<B: Backend> {
 #[derive(Debug, Clone)]
 pub enum ContextManagerError {
     MissingContextError,
-    MissingLogitError
+    MissingLogitError,
+    DecodeError(Utf8Error)
 }
 
 #[derive(Debug, Clone)]
@@ -73,14 +74,14 @@ impl<B: Backend> ContextManager<B> {
         Ok(&self.decoded_text)
     }
 
-    pub fn decode_processed_and_unprocessed_tokens(&mut self) -> Result<String, Utf8Error> {
-        let processed_str = self.decode_processed_tokens()?.to_string();
+    pub fn decode_processed_and_unprocessed_tokens(&mut self) -> Result<String, ContextManagerError> {
+        let processed_str = self.decode_processed_tokens().map_err(|x| ContextManagerError::DecodeError(x))?.to_string();
         let unprocessed_string = match &self.unprocessed_tokens {
             UnprocessedTokens::Logit(_logit) => {
                 String::new()
             }
             UnprocessedTokens::Tokens(tokens) => {
-                self.tokenizer.decode(tokens.clone())?
+                self.tokenizer.decode(tokens.clone()).map_err(|x| ContextManagerError::DecodeError(x))?
             }
             UnprocessedTokens::None => {
                 String::new()
@@ -159,6 +160,37 @@ impl<B: Backend> ContextManager<B> {
         self.unprocessed_tokens = UnprocessedTokens::Logit(logits.squeeze::<2>(0).squeeze(0));
         self.last_layer_state = Some(next_layer_state);
         Ok(())
+    }
+    
+    pub fn sample_forward(&mut self, rwkv: &RWKV7<B>, device: &Device<B>, num_tokens: usize, decode_and_print: bool) -> Result<String, ContextManagerError> {
+        let do_pre_forward = match &self.unprocessed_tokens {
+            UnprocessedTokens::None => {false}
+            UnprocessedTokens::Logit(_) => {false}
+            UnprocessedTokens::Tokens(_) => {true}
+            UnprocessedTokens::Text(_) => {true}
+        };
+        
+        if do_pre_forward {
+            self.rwkv_forward(rwkv, device)?
+        }
+        
+        let mut token_buffer = vec![];
+        let mut generated_tokens = vec![];
+        for _ in 0..num_tokens {
+            let token = self.greedy_sample()?;
+            token_buffer.push(token);
+            generated_tokens.push(token);
+            
+            if decode_and_print {
+                if let Ok(s) = self.tokenizer.decode(token_buffer.clone()) {
+                    token_buffer.clear();
+                    print!("{s}");
+                }
+            }
+
+            self.rwkv_forward(&rwkv, device).unwrap();
+        }
+        self.tokenizer.decode(generated_tokens).map_err(|x| ContextManagerError::DecodeError(x))
     }
 
     pub fn greedy_sample(&mut self) -> Result<u16, ContextManagerError> {

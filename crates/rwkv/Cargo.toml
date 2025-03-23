@@ -3,25 +3,24 @@ name = "rwkv"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "simple_gen"
-path = "src/simple_gen.rs"
-
 [dependencies]
 burn-import = {workspace=true, default-features=false, features=["pytorch"] }
-burn = {workspace = true, default-features=false }
+burn = {workspace = true, default-features=false, features=["ndarray", "autodiff"] }
 rand = "0.8.5"
 llm-samplers = "0.0.7"
 rwkv-tokenizer = {workspace = true}
+half = "2.5.0"
 
 [dev-dependencies]
 pyo3 = {version = "0.24.0", features = ["auto-initialize"]}
 
 [features]
+default = ["ndarray"]
 wgpu = ["burn/wgpu"]
 hip = ["burn/hip"]
 cuda = ["burn/cuda"]
 candle = ["burn/candle"]
 vulkan = ["burn/vulkan"]
 fusion = ["burn/fusion"]
-ndarray = ["burn/ndarray", "burn/openblas"]
+openblas = ["burn/openblas", "ndarray"]
+ndarray = ["burn/openblas"]

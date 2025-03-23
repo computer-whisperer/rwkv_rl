@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyAny};
 use pyo3::ffi::c_str;
 use burn::prelude::{Backend, Device, Int, Module, Tensor};
+use burn::tensor::DType::F32;
 use crate::RWKV7;
 
 fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
@@ -34,7 +35,7 @@ fn main_inner<B: Backend>(device: Device<B>) -> PyResult<()> {
 
         for i in 0..input_tokens.len() {
             let logits = logits.clone().slice(i .. i+1);
-            let logits: Vec<f32> = logits.to_data().into_vec().unwrap();
+            let logits: Vec<f32> = logits.cast(F32).to_data().into_vec().unwrap();
             output_logits.push(logits);
         }
 
@@ -160,7 +161,7 @@ mod vulkan {
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
 
-        main_inner::<Vulkan>(device).unwrap();
+        main_inner::<Vulkan<f32, i32>>(device).unwrap();
     }
 }
 

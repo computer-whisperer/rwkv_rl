@@ -49,7 +49,7 @@ fn chat<B: Backend>(device: Device<B>) {
     println!(
         "\n{} tokens processed ({:.4} tokens/s)\n",
         tokens.len(),
-        tokens.len() as f32 / elapsed as f32
+        tokens.len() as f32 / elapsed
     );
 
     println!(
@@ -118,10 +118,9 @@ mod vulkan {
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
 
-        chat::<Vulkan>(device);
+        chat::<Vulkan<f32, i32>>(device);
     }
 }
-
 
 #[cfg(feature = "ndarray")]
 mod ndarray {
@@ -139,16 +138,34 @@ mod ndarray {
 
 
 pub fn main() {
-    #[cfg(feature = "wgpu")]
-    wgpu::run();
     #[cfg(feature = "cuda")]
-    cuda::run();
-    #[cfg(feature = "hip")]
-    hip::run();
-    #[cfg(feature = "candle")]
-    candle::run();
+    {
+        cuda::run();
+        return;
+    }
     #[cfg(feature = "vulkan")]
-    vulkan::run();
+    {
+        vulkan::run();
+        return
+    }
+    #[cfg(feature = "wgpu")]
+    {
+        wgpu::run();
+        return
+    }
+    #[cfg(feature = "hip")]
+    {
+        hip::run();
+        return;
+    }
+    #[cfg(feature = "candle")]
+    {
+        candle::run();
+        return;
+    }
     #[cfg(feature = "ndarray")]
-    ndarray::run();
+    {
+        ndarray::run();
+        return
+    }
 }
