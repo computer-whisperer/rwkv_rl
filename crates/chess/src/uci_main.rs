@@ -102,44 +102,6 @@ fn chess_uci<B: Backend>(device: Device<B>) {
     }
 }
 
-
-#[cfg(feature = "wgpu")]
-mod wgpu {
-    use super::*;
-    use burn::backend::wgpu::{Wgpu, WgpuDevice};
-
-    pub fn run() {
-        let device = WgpuDevice::DefaultDevice;
-
-        chess_uci::<Wgpu>(device);
-    }
-}
-
-
-#[cfg(feature = "hip")]
-mod hip {
-    use super::*;
-    use burn::backend::hip::{Hip, HipDevice};
-
-    pub fn run() {
-        let device = HipDevice::default();
-
-        chess_uci::<Hip>(device);
-    }
-}
-
-#[cfg(feature = "candle")]
-mod candle {
-    use super::*;
-    use burn::backend::candle::{Candle, CandleDevice};
-
-    pub fn run() {
-        let device = CandleDevice::default();
-
-        chess_uci::<Candle>(device);
-    }
-}
-
 #[cfg(feature = "cuda")]
 mod cuda {
     use super::*;
@@ -179,19 +141,20 @@ mod ndarray {
     }
 }
 
-
-
 pub fn main() {
-    #[cfg(feature = "wgpu")]
-    wgpu::run();
     #[cfg(feature = "cuda")]
-    cuda::run();
-    #[cfg(feature = "hip")]
-    hip::run();
-    #[cfg(feature = "candle")]
-    candle::run();
+    {
+        cuda::run();
+        return;
+    }
     #[cfg(feature = "vulkan")]
-    vulkan::run();
+    {
+        vulkan::run();
+        return;
+    }
     #[cfg(feature = "ndarray")]
-    ndarray::run();
+    {
+        ndarray::run();
+        return;
+    }
 }

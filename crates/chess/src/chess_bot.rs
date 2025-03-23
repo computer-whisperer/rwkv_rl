@@ -1,7 +1,9 @@
 use std::cmp;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+use std::task::Context;
 use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
@@ -30,7 +32,7 @@ pub struct ChessBot<B: Backend> {
     tokenizer: Arc<WorldTokenizer>,
     start_position: Option<Chess>,
     current_position_moves: Option<Vec<Move>>,
-    pub training_data: Vec<(Move, bool)>,
+    pub turn_contexts: Vec<ContextManager<B>>,
     sampler: rwkv::sampling::Sampler,
     move_rng: ThreadRng,
     context_manager: ContextManager<B>
@@ -51,7 +53,7 @@ impl<B: Backend> ChessBot<B> {
         let vocab = tokenizer.get_vocab();
         sc += SampleFlatBias::new(banned_tokens.iter().map(|x| {(vocab.get(&x.to_string()).unwrap().clone() as u32, f32::NEG_INFINITY)}));
         sc += SampleFreqPresence::new(0.1, 0.1, 128);
-        sc += SampleTemperature::new(temperature);;
+        sc += SampleTemperature::new(temperature);
         sc.push_sampler(SampleGreedy::new());
         let sampler = rwkv::sampling::Sampler::LLMSamplers((sc,
             SimpleSamplerResources::new(
@@ -67,7 +69,7 @@ impl<B: Backend> ChessBot<B> {
             tokenizer,
             start_position: None,
             current_position_moves: None,
-            training_data: Vec::new(),
+            turn_contexts: Vec::new(),
             sampler,
             move_rng: rand::thread_rng(),
         }
@@ -128,8 +130,8 @@ impl<B: Backend> ChessBot<B> {
         
         eprint!("\n\n{prompt}");
         let mut turn_context_manager = ContextManager::new_from_previous_context(&self.context_manager);
-        turn_context_manager.add_text(&prompt);
-        turn_context_manager.rwkv_forward(self.rwkv.as_ref(), &self.device);
+        turn_context_manager.add_text(&prompt).unwrap();
+        turn_context_manager.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
 
         let mut thinking_context = ContextManager::new_from_previous_context(&turn_context_manager);
 
@@ -154,8 +156,8 @@ impl<B: Backend> ChessBot<B> {
         }
         if let Ok(decoded_str) = thinking_context.decode_processed_tokens() {
             if !decoded_str.contains("</think>") {
-                thinking_context.add_text("</think>\n");
-                thinking_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
+                thinking_context.add_text("</think>\n").unwrap();
+                thinking_context.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
             }
         }
 
@@ -224,7 +226,7 @@ impl<B: Backend> ChessBot<B> {
 
 
         // Re-write last layer state to include only the move that was chosen
-        turn_context_manager.add_text(&format!("Our next move should be {}\n\n", San::from_move(&current_position, &chosen_move)));
+        turn_context_manager.add_text(&format!("Our next move should be {}\n\n", San::from_move(&current_position, &chosen_move))).unwrap();
         
         if false {
             self.context_manager.add_new_context(&turn_context_manager);
@@ -232,13 +234,15 @@ impl<B: Backend> ChessBot<B> {
 
         eprintln!("Chosen Move: {}", San::from_move(&current_position, &chosen_move));
 
-        self.training_data.push((chosen_move.clone(), is_move_chosen));
+        self.turn_contexts.push(turn_context_manager);
 
         chosen_move
     }
 
-    pub fn dump_token_log(&mut self, output_file: &Path) {
-        let test_string = self.context_manager.decode_processed_tokens().unwrap();
-        std::fs::write(output_file, test_string).unwrap();
+    pub fn dump_game_log(&mut self, output_file: &Path) {
+        let mut f = std::fs::File::create(output_file).unwrap();
+        for c in &mut self.turn_contexts {
+            write!(f, "{}", c.decode_processed_tokens().unwrap()).unwrap();
+        }
     }
 }

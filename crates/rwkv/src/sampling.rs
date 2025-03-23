@@ -37,10 +37,10 @@ impl Sampler {
         (output_token, output_u16)
     }
 
-    pub fn rwkv_sample_single<B: Backend>(&mut self, logits: Tensor<B, 1>) -> (Tensor<B, 0, Int>, u16) {
+    pub fn rwkv_sample_single<B: Backend>(&mut self, logits: Tensor<B, 1>) -> (Tensor<B, 1, Int>, u16) {
         let output_token: Tensor<B, 1, Int> = self.sample(softmax(logits, 0).unsqueeze()).squeeze(0);
         let output_u16 = output_token.to_data().as_slice::<B::IntElem>().unwrap()[0].to_u16();
-        (output_token.squeeze(0), output_u16)
+        (output_token, output_u16)
     }
 }
 

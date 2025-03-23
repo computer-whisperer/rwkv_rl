@@ -28,7 +28,7 @@ pub enum ContextManagerError {
 pub struct ContextManager<B: Backend> {
     processed_tokens: Vec<u16>,
     unprocessed_tokens: UnprocessedTokens<B>,
-    _initial_layer_state: Option<Vec<LayerState<B>>>,
+    initial_layer_state: Option<Vec<LayerState<B>>>,
     last_layer_state: Option<Vec<LayerState<B>>>,
     tokenizer: Arc<WorldTokenizer>,
     decoded_text: String,
@@ -40,7 +40,7 @@ impl<B: Backend> ContextManager<B> {
         Self {
             processed_tokens: Vec::new(),
             unprocessed_tokens: UnprocessedTokens::None,
-            _initial_layer_state: initial_layer_state,
+            initial_layer_state,
             last_layer_state: None,
             tokenizer,
             decoded_text: String::new(),
@@ -52,12 +52,20 @@ impl<B: Backend> ContextManager<B> {
         Self {
             processed_tokens: vec!(),
             unprocessed_tokens: previous_context.unprocessed_tokens.clone(),
-            _initial_layer_state: previous_context.last_layer_state.clone(),
+            initial_layer_state: previous_context.last_layer_state.clone(),
             last_layer_state: previous_context.last_layer_state.clone(),
             tokenizer: previous_context.tokenizer.clone(),
             decoded_text: String::new(),
             num_decoded_tokens: 0
         }
+    }
+    
+    pub fn get_tokens(&self) -> &[u16] {
+        &self.processed_tokens
+    }
+    
+    pub fn get_initial_layer_state(&self) -> Option<&[LayerState<B>]> {
+        self.initial_layer_state.as_deref()
     }
 
     pub fn add_new_context(&mut self, new_context: &Self) {
@@ -123,7 +131,11 @@ impl<B: Backend> ContextManager<B> {
     pub fn get_score(&self, rwkv: &RWKV7<B>, text: &str, device: &Device<B>) -> f32 {
         let tokens = self.tokenizer.encode(text);
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], device);
-        let (logits, _next_layer_state) = rwkv.forward(input.clone().unsqueeze(), self.last_layer_state.as_ref());
+        let last_layer_state = match &self.last_layer_state{
+            None => None,
+            Some(x) => Some(&x[..])
+        };
+        let (logits, _next_layer_state) = rwkv.forward(input.clone().unsqueeze(), last_layer_state);
         let mut values = vec![];
         let mut sum = 0f32;
         for i in 0..tokens.len() - 2 {
@@ -154,7 +166,11 @@ impl<B: Backend> ContextManager<B> {
             UnprocessedTokens::Text(text) => {self.tokenizer.encode(&text)}
         };
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_tokens[..], device);
-        let (logits, next_layer_state) = rwkv.forward(input.unsqueeze(), self.last_layer_state.as_ref());
+        let last_layer_state = match &self.last_layer_state{
+            None => None,
+            Some(x) => Some(&x[..])
+        };
+        let (logits, next_layer_state) = rwkv.forward(input.unsqueeze(), last_layer_state);
         let logits = logits.slice([0..1, (input_tokens.len()-1)..input_tokens.len()]);
         self.processed_tokens.extend(input_tokens);
         self.unprocessed_tokens = UnprocessedTokens::Logit(logits.squeeze::<2>(0).squeeze(0));

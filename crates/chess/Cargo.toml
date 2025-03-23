@@ -11,6 +11,10 @@ path = "src/uci_main.rs"
 name = "self_play_chess"
 path = "src/self_play_main.rs"
 
+[[bin]]
+name = "self_play_train_chess"
+path = "src/self_play_train.rs"
+
 [lib]
 name = "chessbot_lib"
 path = "src/lib.rs"
@@ -19,18 +23,16 @@ path = "src/lib.rs"
 uci-parser = "1.1.0"
 shakmaty = "0.27.2"
 rwkv = {path = "../rwkv"}
-
 rwkv-tokenizer = {workspace = true}
-burn = {workspace=true, default-features=false }
+burn = {workspace=true, default-features=false, features=["autodiff"] }
 burn-import = {workspace=true, default-features=false, features=["pytorch"] }
 rand = "0.8.5"
 llm-samplers = "0.0.7"
 
 [features]
-wgpu = ["burn/wgpu"]
-#hip = ["burn/hip"]
-#cuda = ["burn/cuda-jit"]
-#candle = ["burn/candle"]
+default = ["ndarray"]
+cuda = ["burn/cuda"]
 vulkan = ["burn/vulkan"]
-#fusion = ["burn/fusion"]
-ndarray = ["burn/ndarray", "burn/openblas"]
+fusion = ["burn/fusion"]
+ndarray = ["burn/ndarray"]
+blas = ["burn/openblas", "ndarray"]

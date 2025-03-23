@@ -33,7 +33,7 @@ fn chat<B: Backend>(device: Device<B>) {
     let mut tokens = vec![];
     let now = Instant::now();
     let mut token_buffer = vec![];
-    for _ in 0..1000 {
+    for _ in 0..2000 {
         let token = context_manager.greedy_sample().unwrap();
         token_buffer.push(token);
         tokens.push(token);
@@ -79,7 +79,7 @@ mod hip {
     use burn::backend::hip::{Hip, HipDevice};
 
     pub fn run() {
-        let device = HipDevice::default();
+        let device = HipDevice{index: 0};
 
         chat::<Hip>(device);
     }

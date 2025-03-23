@@ -598,7 +598,7 @@ impl<B: Backend> RWKV7<B> {
         (output_token, output_u16)
     }
 
-    pub fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&Vec<LayerState<B>>>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
+    pub fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
         let mut x = self.emb.forward(input);
 
         //println!("after emb: {x:?}");
@@ -631,21 +631,21 @@ impl<B: Backend> RWKV7<B> {
         (logits, new_channel_states)
     }
     
-    pub fn forward_from_vec(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&Vec<LayerState<B>>>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
+    pub fn forward_from_vec(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
         self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states)
     }
 
-    pub fn forward_from_vec_and_greedy_sample(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&Vec<LayerState<B>>>) -> (Tensor<B, 1, Int>, u16, Vec<LayerState<B>>) {
+    pub fn forward_from_vec_and_greedy_sample(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 1, Int>, u16, Vec<LayerState<B>>) {
         let (logits, new_channel_states) = self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states);
         let (new_token_tensor, new_token_value) = RWKV7::do_greedy_sample(logits.slice([0..1, (inputs.len()-1)..inputs.len()]));
         (new_token_tensor, new_token_value, new_channel_states)
     }
     
-    pub fn get_loss(&self, input_tokens: Tensor<B, 1, Int>, input_state: Option<&Vec<LayerState<B>>>, device: &Device<B>) -> Tensor<B, 1> {
+    pub fn get_loss(&self, input_tokens: Tensor<B, 1, Int>, input_state: Option<&[LayerState<B>]>, device: &Device<B>) -> Tensor<B, 1> {
         let num_tokens = input_tokens.shape().dims[0];
         let expected_values = input_tokens.clone().slice([1..num_tokens]);
         
-        let (logits, next_layer_state) = self.forward(input_tokens.clone().unsqueeze::<2>(), input_state);
+        let (logits, _next_layer_state) = self.forward(input_tokens.clone().unsqueeze::<2>(), input_state);
         let testable_logits = logits.squeeze(0).slice([0..num_tokens-1]);
 
         CrossEntropyLoss::new(None, device).forward(testable_logits, expected_values.clone())

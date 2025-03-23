@@ -1,16 +1,10 @@
 #![recursion_limit = "256"]
 
-use std::io::{stdin, stdout, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use std::sync::Arc;
-use burn::prelude::{Backend, Device, Int, Module, Tensor};
-use burn::record::{FullPrecisionSettings, Recorder};
-use burn::tensor::cast::ToElement;
-use shakmaty::{Chess, EnPassantMode, Move, Outcome, Position};
-use shakmaty::fen::Fen;
+use burn::prelude::{Backend, Device};
+use shakmaty::{Chess, Outcome, Position};
 use shakmaty::san::San;
-use shakmaty::uci::UciMove;
-use uci_parser::{UciCommand, UciResponse};
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
@@ -56,8 +50,8 @@ fn chess_self_play<B: Backend>(device: Device<B>) {
 
     println!("{outcome}");
 
-    chess_bot_a.dump_token_log(&Path::new("chess_bot_a.txt"));
-    chess_bot_b.dump_token_log(&Path::new("chess_bot_b.txt"));
+    chess_bot_a.dump_game_log(&Path::new("chess_bot_a.txt"));
+    chess_bot_b.dump_game_log(&Path::new("chess_bot_b.txt"));
 
     current_position = start_position.clone();
     
@@ -73,43 +67,6 @@ fn chess_self_play<B: Backend>(device: Device<B>) {
     }
 }
 
-
-#[cfg(feature = "wgpu")]
-mod wgpu {
-    use super::*;
-    use burn::backend::wgpu::{Wgpu, WgpuDevice};
-
-    pub fn run() {
-        let device = WgpuDevice::DefaultDevice;
-
-        chess_self_play::<Wgpu>(device);
-    }
-}
-
-
-#[cfg(feature = "hip")]
-mod hip {
-    use super::*;
-    use burn::backend::hip::{Hip, HipDevice};
-
-    pub fn run() {
-        let device = HipDevice::default();
-
-        chess_self_play::<Hip>(device);
-    }
-}
-
-#[cfg(feature = "candle")]
-mod candle {
-    use super::*;
-    use burn::backend::candle::{Candle, CandleDevice};
-
-    pub fn run() {
-        let device = CandleDevice::default();
-
-        chess_self_play::<Candle>(device);
-    }
-}
 
 #[cfg(feature = "cuda")]
 mod cuda {
@@ -153,16 +110,19 @@ mod ndarray {
 
 
 pub fn main() {
-    #[cfg(feature = "wgpu")]
-    wgpu::run();
     #[cfg(feature = "cuda")]
-    cuda::run();
-    #[cfg(feature = "hip")]
-    hip::run();
-    #[cfg(feature = "candle")]
-    candle::run();
+    {
+        cuda::run();
+        return;
+    }
     #[cfg(feature = "vulkan")]
-    vulkan::run();
+    {
+        vulkan::run();
+        return;
+    }
     #[cfg(feature = "ndarray")]
-    ndarray::run();
+    {
+        ndarray::run();
+        return;
+    }
 }
