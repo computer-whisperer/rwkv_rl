@@ -1,13 +1,11 @@
 #![recursion_limit = "256"]
 
 use std::sync::Arc;
-use std::time::Instant;
 use burn::module::Module;
-use burn::nn::loss::CrossEntropyLoss;
 use burn::optim::{AdamConfig, GradientsParams, Optimizer};
 use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::backend::Autodiff;
-use rwkv::RWKV7;
+use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Base, UnfusedRWKV7};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn::tensor::backend::AutodiffBackend;
@@ -15,19 +13,20 @@ use burn_import::pytorch::PyTorchFileRecorder;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
 
-fn chat<B: AutodiffBackend>(device: Device<B>) {
+fn main_inner<B: AutodiffBackend, M: RWKV7<B>>(device: Device<B>) {
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
     let model_path = "/mnt/secondary/rwkv-7-world/RWKV-x070-World-0.1B-v2.8-20241210-ctx4096.pth";
 
 
-    
-    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(rwkv::RWKV7Config::from_record(&record), &device);
-    let rwkv = rwkv.load_record(record);
 
-    let mut context_manager = ContextManager::new(tokenizer.clone(), None);
+    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
+    let rwkv_base = RWKV7Base::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv_base = rwkv_base.load_record(record);
+    let rwkv = M::from_inner(rwkv_base);
+
+    let context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());
 
     println!("Before:");
     {
@@ -35,7 +34,7 @@ fn chat<B: AutodiffBackend>(device: Device<B>) {
         let context = "User: What is the secret number?\n\nAssistant:";
         print!("{}", context);
         local_context.add_text(context).unwrap();
-        local_context.sample_forward(&rwkv, &device, 20, true).unwrap();
+        local_context.sample_forward(&rwkv, 20, true).unwrap();
         print!("\n")
     }
 
@@ -61,9 +60,10 @@ fn chat<B: AutodiffBackend>(device: Device<B>) {
 
             let grads = loss.backward();
 
-            let grads = GradientsParams::from_grads(grads, &trained_rwkv);
+            let grads = GradientsParams::from_grads(grads, trained_rwkv.inner_ref());
 
-            trained_rwkv = optimizer.step(0.0001, trained_rwkv, grads);
+            let new_rwkv_inner = optimizer.step(0.0001, trained_rwkv.inner(), grads);
+            trained_rwkv = M::from_inner(new_rwkv_inner);
         }
         
     }
@@ -75,7 +75,7 @@ fn chat<B: AutodiffBackend>(device: Device<B>) {
         let context = "User: What is the secret number?\n\nAssistant:";
         print!("{}", context);
         local_context.add_text(context).unwrap();
-        local_context.sample_forward(&trained_rwkv, &device, 20, true).unwrap();
+        local_context.sample_forward(&trained_rwkv, 20, true).unwrap();
         print!("\n")
     }
 }
@@ -88,7 +88,8 @@ mod wgpu {
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
 
-        chat::<Wgpu>(device);
+        type B = Autodiff<Wgpu>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
@@ -101,7 +102,8 @@ mod hip {
     pub fn run() {
         let device = HipDevice::default();
 
-        chat::<Hip>(device);
+        type B = Autodiff<Hip>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
@@ -113,7 +115,8 @@ mod candle {
     pub fn run() {
         let device = CandleDevice::default();
 
-        chat::<Candle>(device);
+        type B = Autodiff<Candle>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
@@ -124,8 +127,9 @@ mod cuda {
 
     pub fn run() {
         let device = CudaDevice::default();
-
-        chat::<Cuda<f32, i32>>(device);
+        
+        type B = Autodiff<Cuda<f32, i32>>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
@@ -137,8 +141,8 @@ mod vulkan {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-
-        chat::<Autodiff<Vulkan<f32, i32>>>(device);
+        type B = Autodiff<Vulkan<f32, i32>>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
@@ -150,13 +154,13 @@ mod ndarray {
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
-
-        chat::<Autodiff<NdArray>>(device);
+        type B = Autodiff<NdArray<f32, i32>>;
+        main_inner::<B, UnfusedRWKV7<B>>(device);
     }
 }
 
 
-
+#[allow(unreachable_code)]
 pub fn main() {
     #[cfg(feature = "cuda")]
     {

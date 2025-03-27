@@ -45,9 +45,10 @@ os.environ["RWKV_CUDA_ON"] = '0' # '1' to compile CUDA kernel (10x faster), requ
 
 from rwkv.model import RWKV
 from rwkv.utils import PIPELINE, PIPELINE_ARGS
+import time
 
 # download models: https://huggingface.co/BlinkDL
-model = RWKV(model='/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k', strategy='cpu fp32')
+model = RWKV(model='/ceph-fuse/public/neural_models/llms/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k', strategy='cpu fp32')
 
 pipeline = PIPELINE(model, "rwkv_vocab_v20230424") # for "world" models
 # pipeline = PIPELINE(model, "20B_tokenizer.json") # for "pile" models, 20B_tokenizer.json is in https://github.com/BlinkDL/ChatRWKV
@@ -69,15 +70,9 @@ args = PIPELINE_ARGS(temperature = 1.0, top_p = 0.7, top_k = 100, # top_k = 0 th
                      token_stop = [], # stop generation whenever you see any token here
                      chunk_len = 256) # split input into chunks to save VRAM (shorter -> slower)
 
-pipeline.generate(ctx, token_count=200, args=args, callback=my_print)
-print('\n')
+start_time = time.time()
 
-# !!! model.forward(tokens, state) will modify state in-place !!!
+tokens_to_generate = 2000
+pipeline.generate(ctx, token_count=tokens_to_generate, args=args, callback=my_print)
 
-out, state = model.forward([187, 510, 1563, 310, 247], None)
-print(out.detach().cpu().numpy())                   # get logits
-out, state = model.forward([187, 510], None)
-out, state = model.forward([1563], state)           # RNN has state (use deepcopy to clone states)
-out, state = model.forward([310, 247], state)
-print(out.detach().cpu().numpy())                   # same result as above
-print('\n')
+print('Output speed: {} tokens/s'.format(tokens_to_generate/(time.time() - start_time)))

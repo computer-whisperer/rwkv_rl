@@ -1,39 +1,33 @@
 #![recursion_limit = "256"]
 
-use std::io;
-use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use burn::module::Module;
 use burn::prelude::{Backend, Device};
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Base};
+use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Base, UnfusedRWKV7, FusedRWKV7};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
-use llm_samplers::prelude::{SampleFreqPresence, SampleGreedy, SampleTemperature, SamplerChain, SimpleSamplerResources};
-use rand::prelude::StdRng;
-use rand::SeedableRng;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
 
-fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>){
+fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>) {
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
-    let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth";
+    let model_repo = Path::new("/mnt/secondary/");
+
+    // Use other model repo if this one doesn't exit
+    let model_repo = if model_repo.exists() {
+        model_repo
+    } else {
+        Path::new("/ceph-fuse/public/neural_models/llms/")
+    };
+    
+    let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
     //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth";
     
-    let mut sc = SamplerChain::new();
-    sc += SampleFreqPresence::new(0.1, 0.1, 128);
-    sc += SampleTemperature::new(1.0);
-    sc.push_sampler(SampleGreedy::new());
-    let mut sampler = rwkv::sampling::Sampler::LLMSamplers((sc,
-                                                        SimpleSamplerResources::new(
-                                                            Some(Box::new(StdRng::seed_from_u64(12345))),
-                                                            Some(vec![])
-                                                        )
-    ));
-
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
     let rwkv_base = RWKV7Base::<B>::new(RWKV7Config::from_record(&record), &device);
     let rwkv_base = rwkv_base.load_record(record);
@@ -48,24 +42,13 @@ fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>){
     context_manager.rwkv_forward(&rwkv).unwrap();
 
 
-    let mut tokens = vec![];
     let now = Instant::now();
-    let mut token_buffer = vec![];
     for _ in 0..2000 {
-        //let token = context_manager.greedy_sample().unwrap();
-        context_manager.sample(&mut sampler).unwrap();
-        let token = context_manager.get_latest_token().unwrap();
-            token_buffer.push(token);
-        tokens.push(token);
-
-        if let Ok(s) = tokenizer.decode(token_buffer.clone()) {
-            token_buffer.clear();
-            print!("{s}");
-            io::stdout().flush().unwrap();
-        }
+        context_manager.greedy_sample().unwrap();
         context_manager.rwkv_forward(&rwkv).unwrap();
     }
-
+    
+    let tokens = context_manager.get_tokens();
     let elapsed = now.elapsed().as_secs_f32();
     println!(
         "\n{} tokens processed ({:.4} tokens/s)\n",
@@ -135,7 +118,6 @@ mod vulkan {
     use super::*;
     use burn::backend::{Vulkan};
     use burn::backend::wgpu::{WgpuDevice};
-    use rwkv::rwkv7::FusedRWKV7;
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
@@ -149,7 +131,6 @@ mod ndarray {
     use super::*;
     use burn::backend::NdArray;
     use burn::backend::ndarray::NdArrayDevice;
-    use rwkv::rwkv7::UnfusedRWKV7;
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
@@ -186,7 +167,7 @@ pub fn main() {
         candle::run();
         return;
     }
-
+    
     #[cfg(feature = "ndarray")]
     {
         ndarray::run();

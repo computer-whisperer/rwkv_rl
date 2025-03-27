@@ -1,5 +1,6 @@
 [patch.crates-io]
-candle-core = { path="libs/candle/candle-core" }
+#candle-core = { path="libs/candle/candle-core" }
+candle-core = { git="https://github.com/huggingface/candle.git", branch="main", package="candle-core" }
 
 [workspace]
 members = ["crates/rwkv", "crates/rusty_bar", "crates/chess"]
@@ -10,3 +11,5 @@ resolver = "3"
 burn = {path="libs/burn/crates/burn", default-features=false }
 burn-import = {path="libs/burn/crates/burn-import", default-features=false, features=["pytorch"] }
 rwkv-tokenizer = {path="libs/rwkv-tokenizer/rwkv-tokenizer"}
+cubecl = {git = "https://github.com/tracel-ai/cubecl", default-features = false, rev = "40aaddc8162f2c2261c4a7b1525a490ee250d37e"}
+burn-cubecl = {path="libs/burn/crates/burn-cubecl", default-features = false}

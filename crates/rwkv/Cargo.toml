@@ -5,11 +5,14 @@ edition = "2024"
 
 [dependencies]
 burn-import = {workspace=true, default-features=false, features=["pytorch"] }
+burn-cubecl = {workspace=true, default-features=false}
 burn = {workspace = true, default-features=false, features=["ndarray", "autodiff"] }
 rand = "0.8.5"
 llm-samplers = "0.0.7"
 rwkv-tokenizer = {workspace = true}
 half = "2.5.0"
+time="=0.3.39"
+cubecl = { workspace = true }
 
 [dev-dependencies]
 pyo3 = {version = "0.24.0", features = ["auto-initialize"]}

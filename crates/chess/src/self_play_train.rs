@@ -122,7 +122,7 @@ fn chess_self_play<B: AutodiffBackend>(device: Device<B>) {
                 for turn_context in &mut turn_contexts {
                     let input_state = turn_context.get_initial_layer_state();
                     let tokens = turn_context.get_tokens();
-                    let input_tensor = Tensor::from_ints(tokens, &device);
+                    let input_tensor = Tensor::from_ints(&tokens[..], &device);
                     let loss = current_rwkv_unwrapped.get_loss(input_tensor, input_state, &device);
 
                     println!(
@@ -164,6 +164,19 @@ mod cuda {
     }
 }
 
+#[cfg(feature = "vulkan")]
+mod vulkan {
+    use super::*;
+    use burn::backend::{Vulkan};
+    use burn::backend::wgpu::{WgpuDevice};
+
+    pub fn run() {
+        let device = WgpuDevice::DefaultDevice;
+
+        chess_self_play::<Autodiff<Vulkan>>(device);
+    }
+}
+
 #[cfg(feature = "ndarray")]
 mod ndarray {
     use super::*;
@@ -178,11 +191,16 @@ mod ndarray {
 }
 
 
-
+#[allow(unreachable_code)]
 pub fn main() {
     #[cfg(feature = "cuda")]
     {
         cuda::run();
+        return;
+    }
+    #[cfg(feature = "vulkan")]
+    {
+        vulkan::run();
         return;
     }
     #[cfg(feature = "ndarray")]

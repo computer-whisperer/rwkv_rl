@@ -15,7 +15,7 @@ use rwkv_tokenizer::WorldTokenizer;
 use shakmaty::{Chess, EnPassantMode, Move, Position};
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
-use rwkv::{LayerState, RWKV7};
+use rwkv::rwkv7::{LayerState, RWKV7};
 use rwkv::context_manager::ContextManager;
 use rwkv::sampling::TopP;
 use crate::format_game_moves;
@@ -26,8 +26,8 @@ pub struct ChessGameStepRecord {
     did_choose_move: bool,
 }
 
-pub struct ChessBot<B: Backend> {
-    rwkv: Arc<RWKV7<B>>,
+pub struct ChessBot<B: Backend, M: RWKV7<B>> {
+    rwkv: Arc<M>,
     device: Device<B>,
     tokenizer: Arc<WorldTokenizer>,
     start_position: Option<Chess>,
@@ -38,8 +38,8 @@ pub struct ChessBot<B: Backend> {
     context_manager: ContextManager<B>
 }
 
-impl<B: Backend> ChessBot<B> {
-    pub fn new(rwkv: Arc<RWKV7<B>>, tokenizer: Arc<WorldTokenizer>, device: Device<B>, temperature: f32, seed: u64) -> Self {
+impl<B: Backend, M: RWKV7<B>> ChessBot<B, M> {
+    pub fn new(rwkv: Arc<M>, tokenizer: Arc<WorldTokenizer>, device: Device<B>, temperature: f32, seed: u64) -> Self {
         //let sampler = rwkv::sampling::Sampler::TopP(TopP::new(temperature, seed));
         let mut sc = SamplerChain::new();
         let banned_tokens = vec![
@@ -61,7 +61,7 @@ impl<B: Backend> ChessBot<B> {
                 Some(vec![])
             )
         ));
-        let context_manager =  ContextManager::new(tokenizer.clone(), None);
+        let context_manager =  ContextManager::new(tokenizer.clone(), None, device.clone());
         ChessBot {
             rwkv,
             device,
@@ -131,7 +131,7 @@ impl<B: Backend> ChessBot<B> {
         eprint!("\n\n{prompt}");
         let mut turn_context_manager = ContextManager::new_from_previous_context(&self.context_manager);
         turn_context_manager.add_text(&prompt).unwrap();
-        turn_context_manager.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
+        turn_context_manager.rwkv_forward(self.rwkv.as_ref()).unwrap();
 
         let mut thinking_context = ContextManager::new_from_previous_context(&turn_context_manager);
 
@@ -139,14 +139,15 @@ impl<B: Backend> ChessBot<B> {
 
         let mut token_buffer = vec![];
         for _ in 0..max_thinking_tokens {
-            let new_token = thinking_context.sample(&mut self.sampler).unwrap();
+            thinking_context.sample(&mut self.sampler).unwrap();
+            let new_token = thinking_context.get_latest_token().unwrap();
             token_buffer.push(new_token);
             if let Ok(s) = self.tokenizer.decode(token_buffer.clone()) {
                 token_buffer.clear();
                 eprint!("{s}");
             }
 
-            thinking_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
+            thinking_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
 
             if let Ok(decoded_str) = thinking_context.decode_processed_tokens() {
                 if decoded_str.contains("</think>") {
@@ -157,7 +158,7 @@ impl<B: Backend> ChessBot<B> {
         if let Ok(decoded_str) = thinking_context.decode_processed_tokens() {
             if !decoded_str.contains("</think>") {
                 thinking_context.add_text("</think>\n").unwrap();
-                thinking_context.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
+                thinking_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
             }
         }
 
@@ -167,7 +168,7 @@ impl<B: Backend> ChessBot<B> {
         let (chosen_move, is_move_chosen) = if true {
             let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
             move_context.add_text("Our next move should").unwrap();
-            move_context.rwkv_forward(self.rwkv.as_ref(), &self.device).unwrap();
+            move_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
 
             let legal_moves = current_position.legal_moves();
 
@@ -176,7 +177,7 @@ impl<B: Backend> ChessBot<B> {
             eprint!("\n");
             for m in legal_moves {
                 let move_text = San::from_move(&current_position, &m).to_string();
-                let perplexity = move_context.get_score(&self.rwkv, &format!(" be {move_text}"), &self.device);
+                let perplexity = move_context.get_score(self.rwkv.as_ref(), &format!(" be {move_text}"), &self.device);
                 eprintln!("Move {move_text} has score {perplexity}");
                 best_move = if let Some(best_move) = best_move {
                     if perplexity > best_move.1 {
@@ -191,8 +192,8 @@ impl<B: Backend> ChessBot<B> {
             (best_move.unwrap().0, true)
         } else {
             let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
-            move_context.add_text("Our next move should be");
-            move_context.rwkv_forward(self.rwkv.as_ref(), &self.device);
+            move_context.add_text("Our next move should be").unwrap();
+            move_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
             let mut move_context = ContextManager::new_from_previous_context(&move_context);
 
             let mut new_move = None;
@@ -200,8 +201,8 @@ impl<B: Backend> ChessBot<B> {
             let legal_moves = current_position.legal_moves();
 
             for _ in 0..8 {
-                move_context.greedy_sample();
-                move_context.rwkv_forward(&self.rwkv, &self.device);
+                move_context.greedy_sample().unwrap();
+                move_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
                 if let Ok(decoded_str) = move_context.decode_processed_tokens() {
                     for legal_move in &legal_moves {
                         let move_text = San::from_move(&current_position, &legal_move).to_string();

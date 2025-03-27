@@ -141,6 +141,7 @@ mod ndarray {
     }
 }
 
+#[allow(unreachable_code)]
 pub fn main() {
     #[cfg(feature = "cuda")]
     {
