@@ -12,8 +12,12 @@ use uci_parser::{UciCommand, UciResponse};
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
+use rwkv::rwkv7::{RWKV7Forward, RWKV7};
 
-fn chess_uci<B: Backend>(device: Device<B>) {
+fn chess_uci<B: Backend>(device: Device<B>)
+where
+    RWKV7<B>: RWKV7Forward<B>,
+{
 
     loop {
         let mut input = String::new();

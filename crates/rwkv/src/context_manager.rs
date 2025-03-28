@@ -4,7 +4,7 @@ use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
 use rwkv_tokenizer::WorldTokenizer;
-use crate::rwkv7::{LayerState, RWKV7};
+use crate::rwkv7::{LayerState, RWKV7Forward, RWKV7};
 use crate::context_manager::ContextManagerError::{MissingContextError, MissingLogitError};
 use crate::RWKVFusedBackend;
 use crate::sampling::Sampler;
@@ -38,7 +38,10 @@ pub struct ContextManager<B: Backend> {
     num_decoded_tokens: usize
 }
 
-impl<B: Backend> ContextManager<B> {
+impl<B> ContextManager<B> 
+where
+    B: Backend,
+{
     pub fn new(tokenizer: Arc<WorldTokenizer>, initial_layer_state: Option<Vec<LayerState<B>>>, device: Device<B>) -> Self {
         Self {
             processed_tokens: None,
@@ -161,7 +164,7 @@ impl<B: Backend> ContextManager<B> {
         };
     }
 
-    pub fn get_score(&self, rwkv: & impl RWKV7<B>, text: &str, device: &Device<B>) -> f32 {
+    pub fn get_score(&self, rwkv: &impl RWKV7Forward<B>, text: &str, device: &Device<B>) -> f32 {
         let tokens = self.tokenizer.encode(text);
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], device);
         let last_layer_state = match &self.last_layer_state{
@@ -204,7 +207,7 @@ impl<B: Backend> ContextManager<B> {
         Ok(())
     }
 
-    pub fn rwkv_forward(&mut self, rwkv: &impl RWKV7<B>) -> Result<(), ContextManagerError> {
+    pub fn rwkv_forward(&mut self, rwkv: &impl RWKV7Forward<B>) -> Result<(), ContextManagerError> {
         let (input, input_len) = match std::mem::take(&mut self.unprocessed_tokens) {
             UnprocessedTokens::Logit(_) => {return Err(MissingContextError)}
             UnprocessedTokens::TokensLocal(tokens) => {
@@ -241,7 +244,7 @@ impl<B: Backend> ContextManager<B> {
         Ok(())
     }
 
-    pub fn rwkv_fused_forward(&mut self, rwkv: &impl RWKV7<B>) -> Result<(), ContextManagerError> {
+    pub fn rwkv_fused_forward(&mut self, rwkv: &impl RWKV7Forward<B>) -> Result<(), ContextManagerError> {
         let (input, input_len) = match std::mem::take(&mut self.unprocessed_tokens) {
             UnprocessedTokens::Logit(_) => {return Err(MissingContextError)}
             UnprocessedTokens::TokensLocal(tokens) => {
@@ -278,7 +281,7 @@ impl<B: Backend> ContextManager<B> {
         Ok(())
     }
     
-    pub fn sample_forward(&mut self, rwkv: &impl RWKV7<B>, num_tokens: usize, decode_and_print: bool) -> Result<String, ContextManagerError> {
+    pub fn sample_forward(&mut self, rwkv: &impl RWKV7Forward<B>, num_tokens: usize, decode_and_print: bool) -> Result<String, ContextManagerError> {
         let do_pre_forward = match &self.unprocessed_tokens {
             UnprocessedTokens::None => {false}
             UnprocessedTokens::Logit(_) => {false}

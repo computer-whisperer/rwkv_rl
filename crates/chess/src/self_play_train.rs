@@ -12,6 +12,7 @@ use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
 use shakmaty::Color::{Black, White};
+use rwkv::rwkv7::{RWKV7Forward, RWKV7};
 
 fn material_score(material: ByRole<u8>) -> f32 {
     let mut score = 0.0;
@@ -23,7 +24,10 @@ fn material_score(material: ByRole<u8>) -> f32 {
     score
 }
 
-fn chess_self_play<B: AutodiffBackend>(device: Device<B>) {
+fn chess_self_play<B: AutodiffBackend>(device: Device<B>)
+where
+    RWKV7<B>: RWKV7Forward<B>,
+{
 
     let rwkv = Arc::new(load_model::<B>(&device));
 

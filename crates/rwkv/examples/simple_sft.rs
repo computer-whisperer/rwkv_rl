@@ -5,7 +5,7 @@ use burn::module::Module;
 use burn::optim::{AdamConfig, GradientsParams, Optimizer};
 use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::backend::Autodiff;
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Base, UnfusedRWKV7};
+use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn::tensor::backend::AutodiffBackend;
@@ -13,7 +13,11 @@ use burn_import::pytorch::PyTorchFileRecorder;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
 
-fn main_inner<B: AutodiffBackend, M: RWKV7<B>>(device: Device<B>) {
+fn main_inner<B: AutodiffBackend>(device: Device<B>)
+where
+    B: Backend,
+    RWKV7<B>: RWKV7Forward<B>,
+{
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
@@ -22,9 +26,8 @@ fn main_inner<B: AutodiffBackend, M: RWKV7<B>>(device: Device<B>) {
 
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv_base = RWKV7Base::<B>::new(RWKV7Config::from_record(&record), &device);
-    let rwkv_base = rwkv_base.load_record(record);
-    let rwkv = M::from_inner(rwkv_base);
+    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv = rwkv.load_record(record);
 
     let context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());
 
@@ -60,10 +63,9 @@ fn main_inner<B: AutodiffBackend, M: RWKV7<B>>(device: Device<B>) {
 
             let grads = loss.backward();
 
-            let grads = GradientsParams::from_grads(grads, trained_rwkv.inner_ref());
+            let grads = GradientsParams::from_grads(grads, &trained_rwkv);
 
-            let new_rwkv_inner = optimizer.step(0.0001, trained_rwkv.inner(), grads);
-            trained_rwkv = M::from_inner(new_rwkv_inner);
+            trained_rwkv = optimizer.step(0.0001, trained_rwkv, grads);
         }
         
     }
@@ -87,9 +89,7 @@ mod wgpu {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-
-        type B = Autodiff<Wgpu>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Autodiff<Wgpu<f32, i32>>>(device);
     }
 }
 
@@ -100,10 +100,8 @@ mod hip {
     use burn::backend::hip::{Hip, HipDevice};
 
     pub fn run() {
-        let device = HipDevice::default();
-
-        type B = Autodiff<Hip>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        let device = HipDevice{index: 0};
+        main_inner::<Autodiff<Hip<f32, i32>>>(device);
     }
 }
 
@@ -114,9 +112,7 @@ mod candle {
 
     pub fn run() {
         let device = CandleDevice::default();
-
-        type B = Autodiff<Candle>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Autodiff<Candle>>(device);
     }
 }
 
@@ -127,9 +123,7 @@ mod cuda {
 
     pub fn run() {
         let device = CudaDevice::default();
-        
-        type B = Autodiff<Cuda<f32, i32>>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Autodiff<Cuda<f32, i32>>>(device);
     }
 }
 
@@ -141,8 +135,7 @@ mod vulkan {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        type B = Autodiff<Vulkan<f32, i32>>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Autodiff<Vulkan<f32, i32>>>(device);
     }
 }
 
@@ -154,8 +147,7 @@ mod ndarray {
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
-        type B = Autodiff<NdArray<f32, i32>>;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Autodiff<NdArray>>(device);
     }
 }
 

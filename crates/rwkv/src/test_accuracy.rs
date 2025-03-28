@@ -7,10 +7,13 @@ use pyo3::types::{IntoPyDict, PyAny};
 use pyo3::ffi::c_str;
 use burn::prelude::{Device, Backend, Int, Module, Tensor};
 use burn::tensor::DType::F32;
-use crate::rwkv7::{RWKV7, RWKV7Config, RWKV7Base, FusedRWKV7, UnfusedRWKV7};
-use crate::RWKVFusedBackend;
+use crate::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
 
-fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>) -> PyResult<()> {
+fn main_inner<B>(device: Device<B>) -> PyResult<()>
+where
+    B: Backend,
+    RWKV7<B>: RWKV7Forward<B>
+{
     //let input_tokens = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
     let input_tokens = [510, 444];
 
@@ -34,9 +37,8 @@ fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>) -> PyResult<()> {
     let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_tokens[..], &device);
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.clone().into(), &device).unwrap();
-    let rwkv_base = RWKV7Base::<B>::new(RWKV7Config::from_record(&record), &device);
-    let rwkv_base = rwkv_base.load_record(record);
-    let rwkv = M::from_inner(rwkv_base);
+    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv = rwkv.load_record(record);
 
     println!("Model loaded:");
     let start_time = Instant::now();
@@ -125,11 +127,9 @@ mod wgpu {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        type B = Wgpu<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device).unwrap();
+        main_inner::<Wgpu<f32, i32>>(device);
     }
 }
-
 
 #[cfg(feature = "hip")]
 mod hip {
@@ -138,8 +138,7 @@ mod hip {
 
     pub fn run() {
         let device = HipDevice{index: 0};
-        type B = Hip<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device).unwrap();
+        main_inner::<Hip<f32, i32>>(device);
     }
 }
 
@@ -150,8 +149,7 @@ mod candle {
 
     pub fn run() {
         let device = CandleDevice::default();
-        type B = Candle;
-        main_inner::<B, UnfusedRWKV7<B>>(device).unwrap();
+        main_inner::<Candle>(device);
     }
 }
 
@@ -162,8 +160,7 @@ mod cuda {
 
     pub fn run() {
         let device = CudaDevice::default();
-        type B = Cuda<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device).unwrap();
+        main_inner::<Cuda<f32, i32>>(device);
     }
 }
 
@@ -175,8 +172,7 @@ mod vulkan {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        type B = Vulkan<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device).unwrap();
+        main_inner::<Vulkan<f32, i32>>(device);
     }
 }
 
@@ -188,11 +184,9 @@ mod ndarray {
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
-        type B = NdArray;
-        main_inner::<B, UnfusedRWKV7<B>>(device).unwrap();
+        main_inner::<NdArray>(device);
     }
 }
-
 
 #[test]
 pub fn test_accuracy() {

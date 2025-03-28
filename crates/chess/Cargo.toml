@@ -33,6 +33,6 @@ llm-samplers = "0.0.7"
 default = ["ndarray"]
 cuda = ["burn/cuda"]
 vulkan = ["burn/vulkan"]
-fusion = ["burn/fusion"]
+fusion = ["burn/fusion", "rwkv/fusion"]
 ndarray = ["burn/ndarray"]
 blas = ["burn/openblas", "ndarray"]

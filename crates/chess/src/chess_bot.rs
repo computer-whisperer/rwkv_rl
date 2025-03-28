@@ -15,7 +15,7 @@ use rwkv_tokenizer::WorldTokenizer;
 use shakmaty::{Chess, EnPassantMode, Move, Position};
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
-use rwkv::rwkv7::{LayerState, RWKV7};
+use rwkv::rwkv7::{LayerState, RWKV7Forward, RWKV7};
 use rwkv::context_manager::ContextManager;
 use rwkv::sampling::TopP;
 use crate::format_game_moves;
@@ -26,7 +26,7 @@ pub struct ChessGameStepRecord {
     did_choose_move: bool,
 }
 
-pub struct ChessBot<B: Backend, M: RWKV7<B>> {
+pub struct ChessBot<B: Backend, M: RWKV7Forward<B>> {
     rwkv: Arc<M>,
     device: Device<B>,
     tokenizer: Arc<WorldTokenizer>,
@@ -38,7 +38,7 @@ pub struct ChessBot<B: Backend, M: RWKV7<B>> {
     context_manager: ContextManager<B>
 }
 
-impl<B: Backend, M: RWKV7<B>> ChessBot<B, M> {
+impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
     pub fn new(rwkv: Arc<M>, tokenizer: Arc<WorldTokenizer>, device: Device<B>, temperature: f32, seed: u64) -> Self {
         //let sampler = rwkv::sampling::Sampler::TopP(TopP::new(temperature, seed));
         let mut sc = SamplerChain::new();

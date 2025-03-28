@@ -3208,7 +3208,9 @@ name = "rwkv"
 version = "0.1.0"
 dependencies = [
  "burn",
+ "burn-autodiff",
  "burn-cubecl",
+ "burn-fusion",
  "burn-import",
  "cubecl",
  "half",

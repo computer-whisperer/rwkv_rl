@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 burn-import = {workspace=true, default-features=false, features=["pytorch"] }
 burn-cubecl = {workspace=true, default-features=false}
+burn-fusion = {workspace=true, default-features=false}
+burn-autodiff = {workspace=true, default-features=false}
 burn = {workspace = true, default-features=false, features=["ndarray", "autodiff"] }
 rand = "0.8.5"
 llm-samplers = "0.0.7"

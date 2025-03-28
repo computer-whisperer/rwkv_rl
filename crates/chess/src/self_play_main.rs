@@ -8,12 +8,15 @@ use shakmaty::san::San;
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
-use rwkv::rwkv7::RWKV7;
-use rwkv::rwkv7::UnfusedRWKV7;
+use rwkv::rwkv7::{RWKV7Forward, RWKV7};
 
-fn chess_self_play<B: Backend, M: RWKV7<B>>(device: Device<B>) {
+fn chess_self_play<B: Backend>(device: Device<B>)
+where
+    B: Backend,
+    RWKV7<B>: RWKV7Forward<B>,
+{
 
-    let rwkv = Arc::new(load_model::<B, M>(&device));
+    let rwkv = Arc::new(load_model::<B>(&device));
 
     let start_position = Chess::default();
     let mut current_position = start_position.clone();
@@ -78,7 +81,7 @@ mod cuda {
     pub fn run() {
         let device = CudaDevice::default();
 
-        chess_self_play::<Cuda, UnfusedRWKV7<Cuda>>(device);
+        chess_self_play::<Cuda>(device);
     }
 }
 
@@ -91,7 +94,7 @@ mod vulkan {
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
 
-        chess_self_play::<Vulkan, UnfusedRWKV7<Vulkan>>(device);
+        chess_self_play::<Vulkan>(device);
     }
 }
 
@@ -105,7 +108,7 @@ mod ndarray {
     pub fn run() {
         let device = NdArrayDevice::Cpu;
 
-        chess_self_play::<NdArray, UnfusedRWKV7<NdArray>>(device);
+        chess_self_play::<NdArray>(device);
     }
 }
 

@@ -8,6 +8,7 @@ use burn::tensor::cast::ToElement;
 use burn::tensor::DType::F32;
 use burn::tensor::module::embedding;
 
+
 use super::{simple_matmul_test_custom, RWKVFusedBackend};
 
 #[derive(burn::prelude::Module, Debug)]
@@ -549,7 +550,7 @@ impl RWKV7Config {
         }
     }
 
-    pub fn from_record<B: Backend>(record: &RWKV7BaseRecord<B>) -> Self {
+    pub fn from_record<B: Backend>(record: &RWKV7Record<B>) -> Self {
         let n_layers = record.blocks.len();
         let s: [usize; 2] = record.emb.weight.shape().dims();
         let vocab_size = s[0];
@@ -565,8 +566,40 @@ impl RWKV7Config {
     }
 }
 
+pub trait RWKV7Forward<B: Backend> {
+    fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>);
+
+    fn get_loss(&self, input_tokens: Tensor<B, 1, Int>, input_state: Option<&[LayerState<B>]>, device: &Device<B>) -> Tensor<B, 1> {
+        let num_tokens = input_tokens.shape().dims[0];
+        let expected_values = input_tokens.clone().slice([1..num_tokens]);
+
+        let (logits, _next_layer_state) = self.forward(input_tokens.clone().unsqueeze::<2>(), input_state);
+        let testable_logits = logits.squeeze(0).slice([0..num_tokens-1]);
+
+        CrossEntropyLoss::new(None, device).forward(testable_logits, expected_values.clone())
+    }
+
+
+    fn forward_from_vec(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
+        self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states)
+    }
+
+    fn forward_from_vec_and_greedy_sample(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 1, Int>, u16, Vec<LayerState<B>>) {
+        let (logits, new_channel_states) = self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states);
+        let (new_token_tensor, new_token_value) = Self::do_greedy_sample(logits.slice([0..1, (inputs.len()-1)..inputs.len()]));
+        (new_token_tensor, new_token_value, new_channel_states)
+    }
+
+    fn do_greedy_sample(logits: Tensor<B, 3>) -> (Tensor<B, 1, Int>, u16) {
+        let logits_transformed: Tensor<B, 1> = logits.squeeze::<2>(0).squeeze(0);
+        let output_token = softmax(logits_transformed, 0).argmax(0);
+        let output_u16 = output_token.to_data().as_slice::<B::IntElem>().unwrap()[0].to_u16();
+        (output_token, output_u16)
+    }
+}
+
 #[derive(burn::prelude::Module, Debug)]
-pub struct RWKV7Base<B: Backend> {
+pub struct RWKV7<B: Backend> {
     emb: Embedding<B>,
     pub blocks: Vec<Block<B>>,
     ln_out: LayerNorm<B>,
@@ -575,7 +608,7 @@ pub struct RWKV7Base<B: Backend> {
     d_model: usize,
 }
 
-impl<B: Backend> RWKV7Base<B> {
+impl<B: Backend> RWKV7<B> {
     pub fn new(config: RWKV7Config, device: &B::Device) -> Self{
         let mut blocks = Vec::new();
         for i in 0..config.n_layers {
@@ -627,11 +660,53 @@ impl<B: Backend> RWKV7Base<B> {
         (logits, new_channel_states)
     }
 
+
+}
+
+#[cfg(feature = "ndarray")]
+use burn::backend::NdArray;
+
+#[cfg(feature = "ndarray")]
+impl RWKV7Forward<NdArray> for RWKV7<NdArray> {
+    fn forward(&self, input: Tensor<NdArray, 2, Int>, channel_states: Option<&[LayerState<NdArray>]>) -> (Tensor<NdArray, 3>, Vec<LayerState<NdArray>>) {
+        self.unfused_forward(input, channel_states)
+    }
 }
 
 
+impl <B: RWKVFusedBackend>  RWKV7Forward<B> for RWKV7<B> {
+    fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
+        self.fused_forward(input, channel_states)
+    }
+}
 
-impl <B: RWKVFusedBackend> RWKV7Base<B> {
+#[cfg(feature = "fusion")]
+use burn_fusion::{Fusion, FusionBackend};
+
+#[cfg(feature = "fusion")]
+impl <B: Backend>  RWKV7Forward<Fusion<B>> for RWKV7<Fusion<B>>
+where
+    Fusion<B>: Backend,
+    B: FusionBackend
+{
+    fn forward(&self, input: Tensor<Fusion<B>, 2, Int>, channel_states: Option<&[LayerState<Fusion<B>>]>) -> (Tensor<Fusion<B>, 3>, Vec<LayerState<Fusion<B>>>) {
+        self.unfused_forward(input, channel_states)
+    }
+}
+
+use burn_autodiff::{Autodiff};
+
+impl <B: Backend>  RWKV7Forward<Autodiff<B>> for RWKV7<Autodiff<B>>
+where
+    Autodiff<B>: Backend
+{
+    fn forward(&self, input: Tensor<Autodiff<B>, 2, Int>, channel_states: Option<&[LayerState<Autodiff<B>>]>) -> (Tensor<Autodiff<B>, 3>, Vec<LayerState<Autodiff<B>>>) {
+        self.unfused_forward(input, channel_states)
+    }
+}
+
+
+impl <B: RWKVFusedBackend> RWKV7<B> {
     pub fn fused_forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
         let mut x = self.emb.forward(input);
 
@@ -664,99 +739,4 @@ impl <B: RWKVFusedBackend> RWKV7Base<B> {
 
         (logits, new_channel_states)
     }
-
-    pub fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
-        self.fused_forward(input, channel_states)
-    }
 }
-
-#[cfg(feature = "ndarray")]
-use burn::backend::NdArray;
-#[cfg(feature = "ndarray")]
-impl RWKV7Base<NdArray> {
-    pub fn forward(&self, input: Tensor<NdArray, 2, Int>, channel_states: Option<&[LayerState<NdArray>]>) -> (Tensor<NdArray, 3>, Vec<LayerState<NdArray>>) {
-        self.unfused_forward(input, channel_states)
-    }
-}
-
-pub trait RWKV7<B: Backend> : Clone {
-    fn from_inner(inner: RWKV7Base<B>) -> Self;
-
-    fn inner_ref(&self) -> &RWKV7Base<B>;
-
-    fn inner(self) -> RWKV7Base<B>;
-
-    fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>);
-
-    fn get_loss(&self, input_tokens: Tensor<B, 1, Int>, input_state: Option<&[LayerState<B>]>, device: &Device<B>) -> Tensor<B, 1> {
-        let num_tokens = input_tokens.shape().dims[0];
-        let expected_values = input_tokens.clone().slice([1..num_tokens]);
-
-        let (logits, _next_layer_state) = self.forward(input_tokens.clone().unsqueeze::<2>(), input_state);
-        let testable_logits = logits.squeeze(0).slice([0..num_tokens-1]);
-
-        CrossEntropyLoss::new(None, device).forward(testable_logits, expected_values.clone())
-    }
-
-
-    fn forward_from_vec(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
-        self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states)
-    }
-
-    fn forward_from_vec_and_greedy_sample(&self, inputs: &[u16], device: &Device<B>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 1, Int>, u16, Vec<LayerState<B>>) {
-        let (logits, new_channel_states) = self.forward(Tensor::<B, 1, Int>::from_ints(&inputs[..], device).unsqueeze(), channel_states);
-        let (new_token_tensor, new_token_value) = Self::do_greedy_sample(logits.slice([0..1, (inputs.len()-1)..inputs.len()]));
-        (new_token_tensor, new_token_value, new_channel_states)
-    }
-
-    fn do_greedy_sample(logits: Tensor<B, 3>) -> (Tensor<B, 1, Int>, u16) {
-        let logits_transformed: Tensor<B, 1> = logits.squeeze::<2>(0).squeeze(0);
-        let output_token = softmax(logits_transformed, 0).argmax(0);
-        let output_u16 = output_token.to_data().as_slice::<B::IntElem>().unwrap()[0].to_u16();
-        (output_token, output_u16)
-    }
-
-}
-
-#[derive(Debug, Clone)]
-pub struct UnfusedRWKV7<B: Backend> (RWKV7Base<B>);
-
-impl <B: Backend> RWKV7<B> for UnfusedRWKV7<B> {
-    fn from_inner(inner: RWKV7Base<B>) -> Self {
-        Self(inner)
-    }
-
-    fn inner_ref(&self) -> &RWKV7Base<B> {
-        &self.0
-    }
-
-    fn inner(self) -> RWKV7Base<B> {
-        self.0
-    }
-
-    fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
-        self.0.unfused_forward(input, channel_states)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FusedRWKV7<B: RWKVFusedBackend> (RWKV7Base<B>);
-
-impl <B: RWKVFusedBackend> RWKV7<B> for FusedRWKV7<B> {
-    fn from_inner(inner: RWKV7Base<B>) -> Self {
-        Self(inner)
-    }
-
-    fn inner_ref(&self) -> &RWKV7Base<B> {
-        &self.0
-    }
-
-    fn inner(self) -> RWKV7Base<B> {
-        self.0
-    }
-
-    fn forward(&self, input: Tensor<B, 2, Int>, channel_states: Option<&[LayerState<B>]>) -> (Tensor<B, 3>, Vec<LayerState<B>>) {
-        self.0.fused_forward(input, channel_states)
-    }
-}
-

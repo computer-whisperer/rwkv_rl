@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use burn::module::Module;
 use burn::prelude::{Backend, Device};
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Base};
+use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
@@ -16,12 +16,16 @@ use rand::SeedableRng;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
 
-fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>){
+fn main_inner<B>(device: Device<B>)
+where
+    B: Backend,
+    RWKV7<B>: RWKV7Forward<B>
+{
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
-    let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth";
-    //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth";
+    //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth";
+    let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth";
     
     let mut sc = SamplerChain::new();
     sc += SampleFreqPresence::new(0.1, 0.1, 128);
@@ -35,9 +39,8 @@ fn main_inner<B: Backend, M: RWKV7<B>>(device: Device<B>){
     ));
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv_base = RWKV7Base::<B>::new(RWKV7Config::from_record(&record), &device);
-    let rwkv_base = rwkv_base.load_record(record);
-    let rwkv = M::from_inner(rwkv_base);
+    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv = rwkv.load_record(record);
 
     let mut context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());
     let prompt = "User: How many cats will fit in your average school bus?\n\nAssistant: <think>\nAlright";
@@ -88,8 +91,7 @@ mod wgpu {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        type B = Wgpu<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device);
+        main_inner::<Wgpu<f32, i32>>(device);
     }
 }
 
@@ -101,8 +103,7 @@ mod hip {
 
     pub fn run() {
         let device = HipDevice{index: 0};
-        type B = Hip<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device);
+        main_inner::<Hip<f32, i32>>(device);
     }
 }
 
@@ -113,8 +114,7 @@ mod candle {
 
     pub fn run() {
         let device = CandleDevice::default();
-        type B = Candle;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<Candle>(device);
     }
 }
 
@@ -125,8 +125,7 @@ mod cuda {
 
     pub fn run() {
         let device = CudaDevice::default();
-        type B = Cuda<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device);
+        main_inner::<Cuda<f32, i32>>(device);
     }
 }
 
@@ -135,12 +134,10 @@ mod vulkan {
     use super::*;
     use burn::backend::{Vulkan};
     use burn::backend::wgpu::{WgpuDevice};
-    use rwkv::rwkv7::FusedRWKV7;
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        type B = Vulkan<f32, i32>;
-        main_inner::<B, FusedRWKV7<B>>(device);
+        main_inner::<Vulkan<f32, i32>>(device);
     }
 }
 
@@ -149,12 +146,10 @@ mod ndarray {
     use super::*;
     use burn::backend::NdArray;
     use burn::backend::ndarray::NdArrayDevice;
-    use rwkv::rwkv7::UnfusedRWKV7;
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
-        type B = NdArray;
-        main_inner::<B, UnfusedRWKV7<B>>(device);
+        main_inner::<NdArray>(device);
     }
 }
 
