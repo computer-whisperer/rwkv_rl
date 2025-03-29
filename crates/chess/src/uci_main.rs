@@ -1,22 +1,21 @@
 
-
 use std::io::{stdin, stdout, Write};
 use std::sync::Arc;
-use burn::prelude::{Backend, Device, Int, Module, Tensor};
-use burn::record::{FullPrecisionSettings, Recorder};
+use burn::prelude::{Backend, Device, Module};
+use burn::record::{Recorder};
 use burn::tensor::cast::ToElement;
-use shakmaty::{Chess, EnPassantMode, Move, Position};
-use shakmaty::fen::Fen;
+use shakmaty::{Chess, Position};
 use shakmaty::uci::UciMove;
 use uci_parser::{UciCommand, UciResponse};
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
-use rwkv::rwkv7::{RWKV7Forward, RWKV7};
+use rwkv::rwkv7::{RWKV7Model};
+use rwkv::RWKVForward;
 
 fn chess_uci<B: Backend>(device: Device<B>)
 where
-    RWKV7<B>: RWKV7Forward<B>,
+    RWKV7Model<B>: RWKVForward<B>,
 {
 
     loop {
@@ -60,7 +59,7 @@ where
                 }
                 UciCommand::Position{fen, moves} => {
                     // Process the position command
-                    let mut new_position = if let Some(fen) = fen {
+                    let mut new_position = if let Some(_fen) = fen {
                         unimplemented!()
                     } else {
                         Chess::new()
@@ -76,7 +75,7 @@ where
                     }
                     position = new_position;
                 }
-                UciCommand::Go(go) => {
+                UciCommand::Go(_go) => {
                     // Process the go command
                     chess_bot.set_position(position.clone(), &current_moves);
                     let next_move = chess_bot.get_next_move();

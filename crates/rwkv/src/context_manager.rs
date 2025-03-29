@@ -4,10 +4,8 @@ use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::tensor::activation::softmax;
 use burn::tensor::cast::ToElement;
 use rwkv_tokenizer::WorldTokenizer;
-use crate::rwkv7::{LayerState, RWKV7Forward, RWKV7};
-use crate::context_manager::ContextManagerError::{MissingContextError, MissingLogitError};
-use crate::RWKVFusedBackend;
 use crate::sampling::Sampler;
+use crate::{RWKVForward, RWKVLayerState};
 
 #[derive(Debug, Clone, Default)]
 pub enum UnprocessedTokens<B: Backend> {
@@ -27,22 +25,22 @@ pub enum ContextManagerError {
 }
 
 #[derive(Debug, Clone)]
-pub struct ContextManager<B: Backend> {
+pub struct ContextManager<B: Backend, R: RWKVForward<B>> {
     processed_tokens: Option<Tensor<B, 1, Int>>,
     unprocessed_tokens: UnprocessedTokens<B>,
-    initial_layer_state: Option<Vec<LayerState<B>>>,
-    last_layer_state: Option<Vec<LayerState<B>>>,
+    initial_layer_state: Option<Vec<R::LayerState>>,
+    last_layer_state: Option<Vec<R::LayerState>>,
     tokenizer: Arc<WorldTokenizer>,
     decoded_text: String,
     device: Device<B>,
     num_decoded_tokens: usize
 }
 
-impl<B> ContextManager<B> 
+impl<B, R: RWKVForward<B>> ContextManager<B, R> 
 where
     B: Backend,
 {
-    pub fn new(tokenizer: Arc<WorldTokenizer>, initial_layer_state: Option<Vec<LayerState<B>>>, device: Device<B>) -> Self {
+    pub fn new(tokenizer: Arc<WorldTokenizer>, initial_layer_state: Option<Vec<R::LayerState>>, device: Device<B>) -> Self {
         Self {
             processed_tokens: None,
             unprocessed_tokens: UnprocessedTokens::None,
@@ -75,7 +73,7 @@ where
         }
     }
     
-    pub fn get_initial_layer_state(&self) -> Option<&[LayerState<B>]> {
+    pub fn get_initial_layer_state(&self) -> Option<&[R::LayerState]> {
         self.initial_layer_state.as_deref()
     }
 
@@ -135,7 +133,7 @@ where
         Ok(processed_str + &unprocessed_string)
     }
 
-    pub fn get_last_layer_state(&self) -> Option<&Vec<LayerState<B>>> {
+    pub fn get_last_layer_state(&self) -> Option<&Vec<R::LayerState>> {
         self.last_layer_state.as_ref()
     }
 
@@ -164,7 +162,7 @@ where
         };
     }
 
-    pub fn get_score(&self, rwkv: &impl RWKV7Forward<B>, text: &str, device: &Device<B>) -> f32 {
+    pub fn get_score(&self, rwkv: &R, text: &str, device: &Device<B>) -> f32 {
         let tokens = self.tokenizer.encode(text);
         let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], device);
         let last_layer_state = match &self.last_layer_state{
@@ -174,7 +172,7 @@ where
         let (logits, _next_layer_state) = rwkv.forward(input.clone().unsqueeze(), last_layer_state);
         let mut values = vec![];
         let mut sum = 0f32;
-        for i in 0..tokens.len() - 2 {
+        for i in 0..tokens.len() - 1 {
             let tid = tokens[i+1] as usize;
             let value = logits.clone().slice([0..1, i..i+1, tid..tid+1]).into_scalar().to_f32();
             values.push(value);
@@ -207,9 +205,9 @@ where
         Ok(())
     }
 
-    pub fn rwkv_forward(&mut self, rwkv: &impl RWKV7Forward<B>) -> Result<(), ContextManagerError> {
+    pub fn rwkv_forward(&mut self, rwkv: &R) -> Result<(), ContextManagerError> {
         let (input, input_len) = match std::mem::take(&mut self.unprocessed_tokens) {
-            UnprocessedTokens::Logit(_) => {return Err(MissingContextError)}
+            UnprocessedTokens::Logit(_) => {return Err(ContextManagerError::MissingContextError)}
             UnprocessedTokens::TokensLocal(tokens) => {
                 let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], &self.device);
                 (input, tokens.len())
@@ -218,7 +216,7 @@ where
                 let len = tokens.shape().dims[0];
                 (tokens, len)
             }
-            UnprocessedTokens::None => {return Err(MissingContextError)}
+            UnprocessedTokens::None => {return Err(ContextManagerError::MissingContextError)}
             UnprocessedTokens::Text(text) => {
                 let input_vec = self.tokenizer.encode(&text);
                 let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_vec[..], &self.device);
@@ -231,7 +229,7 @@ where
             Some(x) => Some(&x[..])
         };
         let (logits, next_layer_state) = rwkv.forward(input.clone().unsqueeze(), last_layer_state);
-        let new_next_layer_state: Vec<LayerState<B>> = next_layer_state.into_iter().map(|x| x.detach()).collect();
+        let new_next_layer_state: Vec<R::LayerState> = next_layer_state.into_iter().map(|x| x.detach()).collect();
         let logits = logits.slice([0..1, (input_len-1)..input_len]).detach();
         self.processed_tokens = match core::mem::take(&mut self.processed_tokens) {
             None => {Some(input)}
@@ -244,9 +242,9 @@ where
         Ok(())
     }
 
-    pub fn rwkv_fused_forward(&mut self, rwkv: &impl RWKV7Forward<B>) -> Result<(), ContextManagerError> {
+    pub fn rwkv_fused_forward(&mut self, rwkv: &R) -> Result<(), ContextManagerError> {
         let (input, input_len) = match std::mem::take(&mut self.unprocessed_tokens) {
-            UnprocessedTokens::Logit(_) => {return Err(MissingContextError)}
+            UnprocessedTokens::Logit(_) => {return Err(ContextManagerError::MissingContextError)}
             UnprocessedTokens::TokensLocal(tokens) => {
                 let input: Tensor<B, 1, Int> = Tensor::from_ints(&tokens[..], &self.device);
                 (input, tokens.len())
@@ -255,7 +253,7 @@ where
                 let len = tokens.shape().dims[0];
                 (tokens, len)
             }
-            UnprocessedTokens::None => {return Err(MissingContextError)}
+            UnprocessedTokens::None => {return Err(ContextManagerError::MissingContextError)}
             UnprocessedTokens::Text(text) => {
                 let input_vec = self.tokenizer.encode(&text);
                 let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_vec[..], &self.device);
@@ -268,7 +266,7 @@ where
             Some(x) => Some(&x[..])
         };
         let (logits, next_layer_state) = rwkv.forward(input.clone().unsqueeze(), last_layer_state);
-        let new_next_layer_state: Vec<LayerState<B>> = next_layer_state.into_iter().map(|x| x.detach()).collect();
+        let new_next_layer_state: Vec<R::LayerState> = next_layer_state.into_iter().map(|x| x.detach()).collect();
         let logits = logits.slice([0..1, (input_len-1)..input_len]).detach();
         self.processed_tokens = match core::mem::take(&mut self.processed_tokens) {
             None => {Some(input)}
@@ -281,7 +279,7 @@ where
         Ok(())
     }
     
-    pub fn sample_forward(&mut self, rwkv: &impl RWKV7Forward<B>, num_tokens: usize, decode_and_print: bool) -> Result<String, ContextManagerError> {
+    pub fn sample_forward(&mut self, rwkv: &R, num_tokens: usize, decode_and_print: bool) -> Result<String, ContextManagerError> {
         let do_pre_forward = match &self.unprocessed_tokens {
             UnprocessedTokens::None => {false}
             UnprocessedTokens::Logit(_) => {false}
@@ -328,7 +326,7 @@ where
             UnprocessedTokens::None |
             UnprocessedTokens::TokensLocal(_) |
             UnprocessedTokens::TokensDevice(_) |
-            UnprocessedTokens::Text(_) => {return Err(MissingLogitError)}
+            UnprocessedTokens::Text(_) => {return Err(ContextManagerError::MissingLogitError)}
         };
         self.unprocessed_tokens = UnprocessedTokens::TokensDevice(token_tensor);
         Ok(())
@@ -342,7 +340,7 @@ where
             UnprocessedTokens::None|
             UnprocessedTokens::TokensLocal(_) |
             UnprocessedTokens::TokensDevice(_) |
-            UnprocessedTokens::Text(_) => {return Err(MissingLogitError)}
+            UnprocessedTokens::Text(_) => {return Err(ContextManagerError::MissingLogitError)}
         };
         self.unprocessed_tokens = UnprocessedTokens::TokensLocal(vec![token]);
         Ok(())

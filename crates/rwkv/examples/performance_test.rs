@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use burn::module::Module;
 use burn::prelude::{Backend, Device};
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
+use rwkv::rwkv7::{RWKV7Model, RWKV7Config, RWKVForward};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
@@ -15,7 +15,7 @@ use rwkv::context_manager::ContextManager;
 fn main_inner<B>(device: Device<B>)
 where
     B: Backend,
-    RWKV7<B>: RWKV7Forward<B> {
+    RWKV7Model<B>: RWKVForward<B> {
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
@@ -29,10 +29,11 @@ where
     };
     
     let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
+    println!("Loading model {}", model_path.file_stem().unwrap().to_str().unwrap());
     //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth";
     
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv = RWKV7Model::<B>::new(RWKV7Config::from_record(&record), &device);
     let rwkv = rwkv.load_record(record);
 
     let mut context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());

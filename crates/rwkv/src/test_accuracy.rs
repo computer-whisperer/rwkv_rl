@@ -7,15 +7,15 @@ use pyo3::types::{IntoPyDict, PyAny};
 use pyo3::ffi::c_str;
 use burn::prelude::{Device, Backend, Int, Module, Tensor};
 use burn::tensor::DType::F32;
-use crate::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
+use crate::rwkv7::{RWKV7Model, RWKV7Config, RWKVForward};
 
 fn main_inner<B>(device: Device<B>) -> PyResult<()>
 where
     B: Backend,
-    RWKV7<B>: RWKV7Forward<B>
+    RWKV7Model<B>: RWKVForward<B>
 {
-    //let input_tokens = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
-    let input_tokens = [510, 444];
+    let input_tokens = [510, 444, 1648, 293, 15469, 310, 275, 253, 2846, 273];
+    //let input_tokens = [510, 444];
 
     let model_repo = Path::new("/mnt/secondary/");
 
@@ -25,19 +25,20 @@ where
     } else {
         Path::new("/ceph-fuse/public/neural_models/llms/")
     };
-
-
-    let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth");
-    //let model_path = Path::new("/mnt/secondary/rwkv7-g1/rwkv7-g1-0.1b-20250307-ctx4096.pth");
-    //let model_path = Path::new("/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
-    //let model_path = Path::new("/mnt/secondary/RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth");
-    //let model_path = Path::new("/mnt/secondary/rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth");
-
     println!("Running rust version:");
+
+    //let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth");
+    let model_path = model_repo.join("rwkv7-g1/rwkv7-g1-0.1b-20250307-ctx4096.pth");
+    //let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
+    //let model_path = model_repo.join("RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth");
+    //let model_path = model_repo.join("rwkv-7-world/RWKV-x070-World-1.5B-v3-20250127-ctx4096.pth");
+    println!("Loading model {}", model_path.file_stem().unwrap().to_str().unwrap());
+
+    
     let input: Tensor<B, 1, Int> = Tensor::from_ints(&input_tokens[..], &device);
 
     let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.clone().into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let rwkv = RWKV7Model::<B>::new(RWKV7Config::from_record(&record), &device);
     let rwkv = rwkv.load_record(record);
 
     println!("Model loaded:");
@@ -63,7 +64,7 @@ where
         input_tokens.len() as f32 / elapsed as f32
     );
     
-    println!("rust output: {output_logits:?}");
+    //println!("rust output: {output_logits:?}");
 
     println!("Running python version:");
 
@@ -127,7 +128,7 @@ mod wgpu {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        main_inner::<Wgpu<f32, i32>>(device);
+        main_inner::<Wgpu<f32, i32>>(device).unwrap();
     }
 }
 
@@ -138,7 +139,7 @@ mod hip {
 
     pub fn run() {
         let device = HipDevice{index: 0};
-        main_inner::<Hip<f32, i32>>(device);
+        main_inner::<Hip<f32, i32>>(device).unwrap();
     }
 }
 
@@ -149,7 +150,7 @@ mod candle {
 
     pub fn run() {
         let device = CandleDevice::default();
-        main_inner::<Candle>(device);
+        main_inner::<Candle>(device).unwrap();
     }
 }
 
@@ -160,7 +161,7 @@ mod cuda {
 
     pub fn run() {
         let device = CudaDevice::default();
-        main_inner::<Cuda<f32, i32>>(device);
+        main_inner::<Cuda<f32, i32>>(device).unwrap();
     }
 }
 
@@ -172,7 +173,7 @@ mod vulkan {
 
     pub fn run() {
         let device = WgpuDevice::DefaultDevice;
-        main_inner::<Vulkan<f32, i32>>(device);
+        main_inner::<Vulkan<f32, i32>>(device).unwrap();
     }
 }
 
@@ -184,10 +185,11 @@ mod ndarray {
 
     pub fn run() {
         let device = NdArrayDevice::Cpu;
-        main_inner::<NdArray>(device);
+        main_inner::<NdArray>(device).unwrap();
     }
 }
 
+#[allow(unreachable_code)]
 #[test]
 pub fn test_accuracy() {
     #[cfg(feature = "wgpu")]

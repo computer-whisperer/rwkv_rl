@@ -2,11 +2,12 @@
 
 use std::io;
 use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use burn::module::Module;
 use burn::prelude::{Backend, Device};
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
+use rwkv::rwkv7::{RWKV7Model, RWKV7Config};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
@@ -15,17 +16,19 @@ use rand::prelude::StdRng;
 use rand::SeedableRng;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
+use rwkv::RWKVForward;
 
 fn main_inner<B>(device: Device<B>)
 where
     B: Backend,
-    RWKV7<B>: RWKV7Forward<B>
+    RWKV7Model<B>: RWKVForward<B>
 {
 
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
     //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth";
-    let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth";
+    let model_path = Path::new("/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth");
+    println!("Loading model {}", model_path.file_stem().unwrap().to_str().unwrap());
     
     let mut sc = SamplerChain::new();
     sc += SampleFreqPresence::new(0.1, 0.1, 128);
@@ -38,8 +41,8 @@ where
                                                         )
     ));
 
-    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.to_path_buf().into(), &device).unwrap();
+    let rwkv = RWKV7Model::<B>::new(RWKV7Config::from_record(&record), &device);
     let rwkv = rwkv.load_record(record);
 
     let mut context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());

@@ -1,32 +1,33 @@
 #![recursion_limit = "256"]
 
+use std::path::Path;
 use std::sync::Arc;
 use burn::module::Module;
 use burn::optim::{AdamConfig, GradientsParams, Optimizer};
 use burn::prelude::{Backend, Device, Int, Tensor};
 use burn::backend::Autodiff;
-use rwkv::rwkv7::{RWKV7, RWKV7Config, RWKV7Forward};
+use rwkv::rwkv7::{RWKV7Model, RWKV7Config};
 
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn::tensor::backend::AutodiffBackend;
 use burn_import::pytorch::PyTorchFileRecorder;
 use rwkv_tokenizer::WorldTokenizer;
 use rwkv::context_manager::ContextManager;
+use rwkv::RWKVForward;
 
 fn main_inner<B: AutodiffBackend>(device: Device<B>)
 where
     B: Backend,
-    RWKV7<B>: RWKV7Forward<B>,
+    RWKV7Model<B>: RWKVForward<B>,
 {
-
     let tokenizer = Arc::new(WorldTokenizer::new(None).unwrap());
 
-    let model_path = "/mnt/secondary/rwkv-7-world/RWKV-x070-World-0.1B-v2.8-20241210-ctx4096.pth";
+    let model_path = Path::new("/mnt/secondary/rwkv-7-world/RWKV-x070-World-0.1B-v2.8-20241210-ctx4096.pth");
+    println!("Loading model {}", model_path.file_stem().unwrap().to_str().unwrap());
 
 
-
-    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.into(), &device).unwrap();
-    let rwkv = RWKV7::<B>::new(RWKV7Config::from_record(&record), &device);
+    let record = PyTorchFileRecorder::<FullPrecisionSettings>::new().load(model_path.to_path_buf().into(), &device).unwrap();
+    let rwkv = RWKV7Model::<B>::new(RWKV7Config::from_record(&record), &device);
     let rwkv = rwkv.load_record(record);
 
     let context_manager = ContextManager::new(tokenizer.clone(), None, device.clone());

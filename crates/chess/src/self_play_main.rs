@@ -8,12 +8,13 @@ use shakmaty::san::San;
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
-use rwkv::rwkv7::{RWKV7Forward, RWKV7};
+use rwkv::rwkv7::{RWKV7Model};
+use rwkv::RWKVForward;
 
 fn chess_self_play<B: Backend>(device: Device<B>)
 where
     B: Backend,
-    RWKV7<B>: RWKV7Forward<B>,
+    RWKV7Model<B>: RWKVForward<B>,
 {
 
     let rwkv = Arc::new(load_model::<B>(&device));

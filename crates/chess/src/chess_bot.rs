@@ -1,24 +1,16 @@
-use std::cmp;
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
-use std::task::Context;
-use burn::prelude::{Backend, Device, Int, Tensor};
-use burn::tensor::activation::softmax;
-use burn::tensor::cast::ToElement;
-use llm_samplers::prelude::{SampleFlatBias, SampleFreqPresence, SampleGreedy, SampleRepetition, SampleTemperature, SamplerChain};
+use burn::prelude::{Backend, Device};
+use llm_samplers::prelude::{SampleFlatBias, SampleFreqPresence, SampleGreedy, SampleTemperature, SamplerChain};
 use llm_samplers::types::SimpleSamplerResources;
 use rand::prelude::{SliceRandom, StdRng, ThreadRng};
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rwkv_tokenizer::WorldTokenizer;
-use shakmaty::{Chess, EnPassantMode, Move, Position};
-use shakmaty::fen::Fen;
+use shakmaty::{Chess, Color, Move, Position, Role};
 use shakmaty::san::San;
-use rwkv::rwkv7::{LayerState, RWKV7Forward, RWKV7};
 use rwkv::context_manager::ContextManager;
-use rwkv::sampling::TopP;
-use crate::format_game_moves;
+use rwkv::RWKVForward;
 
 pub struct ChessGameStepRecord {
     position: Chess,
@@ -26,19 +18,19 @@ pub struct ChessGameStepRecord {
     did_choose_move: bool,
 }
 
-pub struct ChessBot<B: Backend, M: RWKV7Forward<B>> {
+pub struct ChessBot<B: Backend, M: RWKVForward<B>> {
     rwkv: Arc<M>,
     device: Device<B>,
     tokenizer: Arc<WorldTokenizer>,
     start_position: Option<Chess>,
     current_position_moves: Option<Vec<Move>>,
-    pub turn_contexts: Vec<ContextManager<B>>,
+    pub turn_contexts: Vec<ContextManager<B, M>>,
     sampler: rwkv::sampling::Sampler,
     move_rng: ThreadRng,
-    context_manager: ContextManager<B>
+    context_manager: ContextManager<B, M>
 }
 
-impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
+impl<B: Backend, M: RWKVForward<B>> ChessBot<B, M> {
     pub fn new(rwkv: Arc<M>, tokenizer: Arc<WorldTokenizer>, device: Device<B>, temperature: f32, seed: u64) -> Self {
         //let sampler = rwkv::sampling::Sampler::TopP(TopP::new(temperature, seed));
         let mut sc = SamplerChain::new();
@@ -48,11 +40,11 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
             "Question",
             "Answer",
             "\n\n",
-            //"<"
+            "<"
         ];
         let vocab = tokenizer.get_vocab();
         sc += SampleFlatBias::new(banned_tokens.iter().map(|x| {(vocab.get(&x.to_string()).unwrap().clone() as u32, f32::NEG_INFINITY)}));
-        sc += SampleFreqPresence::new(0.1, 0.1, 128);
+        sc += SampleFreqPresence::new(0.10, 0.10, 128);
         sc += SampleTemperature::new(temperature);
         sc.push_sampler(SampleGreedy::new());
         let sampler = rwkv::sampling::Sampler::LLMSamplers((sc,
@@ -116,16 +108,43 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
             .replace("q", "♛")
             .replace("K", "♔")
             .replace("k", "♚"),
-             "(in black/white unicode chess symbols (♟♙♜♖♞♘♝♗♛♕♚♔))")
+             " (in black/white unicode chess symbols (♟♙♜♖♞♘♝♗♛♕♚♔))")
+        } else if true {
+            // Enumerate pieces by color and type, listing their positions:
+            let mut board_substrings = vec![];
+            for color in [Color::White, Color::Black] {
+                for role in [Role::Pawn, Role::Knight, Role::Bishop, Role::Rook, Role::Queen, Role::King] {
+                    let pieces: Vec<_> = board.iter().filter(|(_, piece)| {piece.color == color && piece.role == role}).collect();
+                    let name = match role {
+                        Role::Pawn => {"pawn"}
+                        Role::Knight => {"knight"}
+                        Role::Bishop => {"bishop"}
+                        Role::Rook => {"rook"}
+                        Role::Queen => {"queen"}
+                        Role::King => {"king"}
+                    };
+                    if !pieces.is_empty() {
+                        if pieces.len() == 1 {
+                            board_substrings.push(format!("{color} {name} at {}", pieces[0].0));
+                        }
+                        else {
+                            let positions = pieces.iter().map(|(pos, _)| {pos.to_string()}).collect::<Vec<_>>().join(", ");
+                            board_substrings.push(format!("{color} {name}s at {positions}"));
+                        }
+                    }
+                }
+            }
+            let all_pieces = board_substrings.join(", ");
+            (format!("[{all_pieces}]"), "")
         } else {
-            (board.board_fen(current_position.promoted()).to_string(), "(in FEN notation, so the white pieces are represented by P: pawn, R: rook, N: knight, B: bishop, Q: queen, K: king, and the black pieces by p: pawn, r: rook, n: knight, b: bishop, q: queen, k: king)")
+            (board.board_fen(current_position.promoted()).to_string(), " (in FEN notation, so the white pieces are represented by P: pawn, R: rook, N: knight, B: bishop, Q: queen, K: king, and the black pieces by p: pawn, r: rook, n: knight, b: bishop, q: queen, k: king)")
         };
         let current_color_to_move = current_position.turn();
         let prompt = if move_str_parts.is_empty() {
-            format!("User: We are playing chess against an opponent! We are playing {current_color_to_move}, we are the first to move, and the current board state {board_format_explain} is {processed_board_str}. Please think carefully and then provide our first move in algebraic format.\n\nAssistant: <think>", )
+            format!("User: You are playing chess against an opponent! You are playing {current_color_to_move}, you are the first to move, and the current board state{board_format_explain} is: {processed_board_str}. Please think carefully and then provide your first move in algebraic format (for example: \"e4\").\n\nAssistant: <think>", )
         } else {
             let combined_move_str = move_str_parts.join(" ");
-            format!("User: We are playing chess against an opponent! We are playing {current_color_to_move}, the previous moves so far are: [{combined_move_str}], and the current board state {board_format_explain} is {processed_board_str}. Please think carefully and then provide our next move in algebraic format.\n\nAssistant: <think>", )
+            format!("User: You are playing chess against an opponent! You are playing {current_color_to_move}, the previous moves so far are: [{combined_move_str}], and the current board state{board_format_explain} is: {processed_board_str}. Please think carefully and then provide your next move in algebraic format (for example: \"e4\").\n\nAssistant: <think>", )
         };
         
         eprint!("\n\n{prompt}");
@@ -135,7 +154,7 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
 
         let mut thinking_context = ContextManager::new_from_previous_context(&turn_context_manager);
 
-        let max_thinking_tokens = 800;
+        let max_thinking_tokens = 1000;
 
         let mut token_buffer = vec![];
         for _ in 0..max_thinking_tokens {
@@ -167,7 +186,7 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
 
         let (chosen_move, is_move_chosen) = if true {
             let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
-            move_context.add_text("Our next move should").unwrap();
+            move_context.add_text("My next move should").unwrap();
             move_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
 
             let legal_moves = current_position.legal_moves();
@@ -177,7 +196,7 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
             eprint!("\n");
             for m in legal_moves {
                 let move_text = San::from_move(&current_position, &m).to_string();
-                let perplexity = move_context.get_score(self.rwkv.as_ref(), &format!(" be {move_text}"), &self.device);
+                let perplexity = move_context.get_score(self.rwkv.as_ref(), &format!(" be {move_text}\n\n"), &self.device);
                 eprintln!("Move {move_text} has score {perplexity}");
                 best_move = if let Some(best_move) = best_move {
                     if perplexity > best_move.1 {
@@ -192,7 +211,7 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
             (best_move.unwrap().0, true)
         } else {
             let mut move_context = ContextManager::new_from_previous_context(&turn_context_manager);
-            move_context.add_text("Our next move should be").unwrap();
+            move_context.add_text("My next move should be").unwrap();
             move_context.rwkv_forward(self.rwkv.as_ref()).unwrap();
             let mut move_context = ContextManager::new_from_previous_context(&move_context);
 
@@ -227,7 +246,7 @@ impl<B: Backend, M: RWKV7Forward<B>> ChessBot<B, M> {
 
 
         // Re-write last layer state to include only the move that was chosen
-        turn_context_manager.add_text(&format!("Our next move should be {}\n\n", San::from_move(&current_position, &chosen_move))).unwrap();
+        turn_context_manager.add_text(&format!("My next move should be {}\n\n", San::from_move(&current_position, &chosen_move))).unwrap();
         
         if false {
             self.context_manager.add_new_context(&turn_context_manager);

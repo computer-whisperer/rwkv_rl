@@ -8,10 +8,18 @@ exclude = ["libs"]
 resolver = "3"
 
 [workspace.dependencies]
-burn = {path="libs/burn/crates/burn", default-features=false }
-burn-import = {path="libs/burn/crates/burn-import", default-features=false, features=["pytorch"] }
-burn-fusion = {path="libs/burn/crates/burn-fusion", default-features=false }
-burn-autodiff = {path="libs/burn/crates/burn-autodiff", default-features=false }
+#burn = {path="libs/burn/crates/burn", default-features=false }
+#burn-import = {path="libs/burn/crates/burn-import", default-features=false, features=["pytorch"] }
+#burn-fusion = {path="libs/burn/crates/burn-fusion", default-features=false }
+#burn-autodiff = {path="libs/burn/crates/burn-autodiff", default-features=false }
+#burn-cubecl = {path="libs/burn/crates/burn-cubecl", default-features = false}
+
+burn = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-import = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-fusion = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-autodiff = {git="https://github.com/tracel-ai/burn", default-features=false }
+burn-cubecl = {git="https://github.com/tracel-ai/burn", default-features=false }
+
 rwkv-tokenizer = {path="libs/rwkv-tokenizer/rwkv-tokenizer"}
 cubecl = {git = "https://github.com/tracel-ai/cubecl", default-features = false, rev = "40aaddc8162f2c2261c4a7b1525a490ee250d37e"}
-burn-cubecl = {path="libs/burn/crates/burn-cubecl", default-features = false}
+
