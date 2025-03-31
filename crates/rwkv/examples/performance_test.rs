@@ -28,7 +28,7 @@ where
         Path::new("/ceph-fuse/public/neural_models/llms/")
     };
     
-    let model_path = model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
+    let model_path = model_repo.join("RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth");
     println!("Loading model {}", model_path.file_stem().unwrap().to_str().unwrap());
     //let model_path = "/mnt/secondary/temp-latest-training-models/RWKV7-G1-2.9B-16%trained-20250313-ctx4k.pth";
     
@@ -43,8 +43,13 @@ where
     print!("Processing prompt: \n{}", prompt);
 
     context_manager.rwkv_forward(&rwkv).unwrap();
-
-
+    // Warm up
+    for _ in 0..100 {
+        context_manager.greedy_sample().unwrap();
+        context_manager.rwkv_forward(&rwkv).unwrap();
+    }
+    println!("Warm up complete.");
+    
     let now = Instant::now();
     for _ in 0..2000 {
         context_manager.greedy_sample().unwrap();

@@ -1,9 +1,9 @@
 mod burn_impl;
 mod fused_impl;
-mod kernel;
+mod fused_impl_kernel;
 
 use burn::module::{Param};
-use burn::nn::{Linear, LinearConfig, Initializer, LayerNorm, LayerNormConfig, GroupNormConfig, GroupNorm};
+use burn::nn::{Linear, LinearConfig, Initializer, LayerNorm, LayerNormConfig, GroupNormConfig, GroupNorm, Tanh, Sigmoid};
 use burn::prelude::{Tensor, Backend};
 use burn::tensor::{Int};
 use burn::tensor::module::embedding;
@@ -348,4 +348,55 @@ where
     fn forward(&self, input: Tensor<Autodiff<B>, 2, Int>, channel_states: Option<&[LayerState<Autodiff<B>>]>) -> (Tensor<Autodiff<B>, 3>, Vec<LayerState<Autodiff<B>>>) {
         self.unfused_forward(input, channel_states)
     }
+}
+
+fn lerp<B: Backend, const D: usize>(start: Tensor<B, D>, end: Tensor<B, D>, weight: Tensor<B, D>) -> Tensor<B, D> {
+    start.clone() + weight * ( end - start)
+}
+
+fn lora_forward<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
+    let x1 = x.matmul(l1.unsqueeze());
+    let x = x1.matmul(l2.unsqueeze());
+    if let Some(base) = base {
+        x + base
+    } else {
+        x
+    }
+}
+
+fn lora_forward_sigmoid<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
+    let x = x.matmul(l1.unsqueeze());
+    let activation = Sigmoid::new();
+    let x = activation.forward(x).matmul(l2.unsqueeze());
+    if let Some(base) = base {
+        x + base
+    } else {
+        x
+    }
+}
+
+fn lora_forward_tanh<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
+    let x = x.matmul(l1.unsqueeze());
+    let activation = Tanh::new();
+    let x = activation.forward(x).matmul(l2.unsqueeze());
+    if let Some(base) = base {
+        x + base
+    } else {
+        x
+    }
+}
+
+fn inner_norm<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize, p: f32) -> Tensor<B, D> {
+    x.abs().powf_scalar(p).sum_dim(dim).powf_scalar(1./p)
+}
+
+fn normalize<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize, p: f32) -> Tensor<B, D> {
+    // In python:
+    /*
+     eps = 1e-12
+     denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+     return input / denom
+     */
+    let denom = inner_norm(x.clone(), dim, p).clamp_min(1e-12);
+    x / denom
 }

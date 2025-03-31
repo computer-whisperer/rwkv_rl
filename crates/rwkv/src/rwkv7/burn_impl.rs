@@ -2,61 +2,11 @@ use burn::nn::{Sigmoid, Tanh};
 use burn::prelude::{Backend, Tensor};
 use burn::tensor::activation::{relu, sigmoid, softplus};
 use burn::tensor::DType;
-use crate::rwkv7::{Block, ChannelMixer, LayerState, TimeMixer, RWKV7Model};
+use crate::rwkv7::{Block, ChannelMixer, LayerState, TimeMixer, RWKV7Model, lerp, lora_forward_sigmoid, lora_forward_tanh, normalize, lora_forward};
 
-fn lerp<B: Backend, const D: usize>(start: Tensor<B, D>, end: Tensor<B, D>, weight: Tensor<B, D>) -> Tensor<B, D> {
-    start.clone() + weight * ( end - start)
-}
-
-fn lora_forward<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
-    let x1 = x.matmul(l1.unsqueeze());
-    let x = x1.matmul(l2.unsqueeze());
-    if let Some(base) = base {
-        x + base
-    } else {
-        x
-    }
-}
-
-fn lora_forward_sigmoid<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
-    let x = x.matmul(l1.unsqueeze());
-    let activation = Sigmoid::new();
-    let x = activation.forward(x).matmul(l2.unsqueeze());
-    if let Some(base) = base {
-        x + base
-    } else {
-        x
-    }
-}
-
-fn lora_forward_tanh<B: Backend, const D: usize>(l1: Tensor<B, 2>, l2: Tensor<B, 2>, base: Option<Tensor<B, D>>, x: Tensor<B, D>) -> Tensor<B, D> {
-    let x = x.matmul(l1.unsqueeze());
-    let activation = Tanh::new();
-    let x = activation.forward(x).matmul(l2.unsqueeze());
-    if let Some(base) = base {
-        x + base
-    } else {
-        x
-    }
-}
-
-fn inner_norm<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize, p: f32) -> Tensor<B, D> {
-    x.abs().powf_scalar(p).sum_dim(dim).powf_scalar(1./p)
-}
-
-fn normalize<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize, p: f32) -> Tensor<B, D> {
-    // In python:
-    /*
-     eps = 1e-12
-     denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
-     return input / denom
-     */
-    let denom = inner_norm(x.clone(), dim, p).clamp_min(1e-12);
-    x / denom
-}
 
 impl <B: Backend> TimeMixer<B> {
-    fn forward(&self, hidden_state_in: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, time_mixer_x_state: Tensor<B, 2>, vk_state: Tensor<B, 4>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, Tensor<B, 4>) {
+    pub(crate) fn unfused_forward(&self, hidden_state_in: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, time_mixer_x_state: Tensor<B, 2>, vk_state: Tensor<B, 4>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, Tensor<B, 4>) {
         let d_batch = hidden_state_in.shape().dims[0];
         let d_tokens = hidden_state_in.shape().dims[1];
         let d_k = d_model/ n_heads;
@@ -136,12 +86,13 @@ impl <B: Backend> TimeMixer<B> {
             let decay = decay.clone().slice(ranges).squeeze(1);
             let iclr = iclr.clone().slice(ranges).squeeze(1);
             let deformed_key = deformed_key.clone().slice(ranges).squeeze(1);
-            let (new_out, new_vk_state) = self.single_timestep(r, k, v, decay, iclr, deformed_key, vk_state);
+            let (new_out, new_vk_state) = self.unfused_single_timestep(r, k, v, decay, iclr, deformed_key, vk_state);
             vk_state = new_vk_state;
             outputs.push(new_out);
         }
         let out: Tensor<B, 4> = Tensor::stack(outputs, 1);
         let out = out.reshape([d_batch, d_tokens, d_model]);
+        
         //println!("a: {out}");
 
         //println!("ln_x gamma: {:?}", self.ln_x.gamma.clone().unwrap().val());
@@ -172,7 +123,7 @@ impl <B: Backend> TimeMixer<B> {
         (out, v0, vk_state)
     }
 
-    fn single_timestep(&self,
+    fn unfused_single_timestep(&self,
                        r: Tensor<B, 3>,
                        k: Tensor<B, 3>,
                        v: Tensor<B, 3>,
@@ -241,7 +192,7 @@ impl <B: Backend> TimeMixer<B> {
 }
 
 impl<B: Backend> ChannelMixer<B> {
-    fn forward(&self, hidden_state_in: Tensor<B, 3>, x_state: Tensor<B, 2>) -> Tensor<B, 3> {
+    pub(crate) fn unfused_forward(&self, hidden_state_in: Tensor<B, 3>, x_state: Tensor<B, 2>) -> Tensor<B, 3> {
         //let d_batch = hidden_state_in.shape().dims[0];
         let d_tokens = hidden_state_in.shape().dims[1];
         let x_shifted_one_to_the_past : Tensor<B, 3> = if d_tokens > 1 {
@@ -259,18 +210,8 @@ impl<B: Backend> ChannelMixer<B> {
 }
 
 impl<B: Backend> Block<B> {
-    pub(crate) fn forward(&self, _layer_num: usize, x: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, s: Option<&LayerState<B>>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, LayerState<B>) {
+    pub(crate) fn unfused_forward(&self, _layer_num: usize, x: Tensor<B, 3>, v0: Option<Tensor<B, 3>>, s: Option<&LayerState<B>>, d_model: usize, n_heads: usize) -> (Tensor<B, 3>, Tensor<B, 3>, LayerState<B>) {
         let num_tokens = x.dims()[1];
-
-        use burn::tensor::{set_print_options, PrintOptions};
-
-        let print_options = PrintOptions {
-            precision: Some(4),
-            threshold: 3000,
-            ..Default::default()
-        };
-
-        set_print_options(print_options);
 
         let x = if let Some(ln0) = &self.ln0 {
             ln0.forward(x)
@@ -289,7 +230,7 @@ impl<B: Backend> Block<B> {
         } else {
             x1.clone()
         }.squeeze(1);
-        let (x2, new_v0, new_vk_state) = self.att.forward(x1.clone(), v0, s.time_mixer_x_state, s.vk_state, d_model, n_heads);
+        let (x2, new_v0, new_vk_state) = self.att.unfused_forward(x1.clone(), v0, s.time_mixer_x_state, s.vk_state, d_model, n_heads);
         let x3 = x + x2;
         let x4 = self.ln2.forward(x3.clone());
         let new_channel_mixer_x_state: Tensor<B, 2> = if num_tokens > 1 {
@@ -297,7 +238,7 @@ impl<B: Backend> Block<B> {
         } else {
             x4.clone()
         }.squeeze(1);
-        let x5 = self.ffn.forward(x4.clone(), s.channel_mixer_x_state);
+        let x5 = self.ffn.unfused_forward(x4.clone(), s.channel_mixer_x_state);
 
         let x6 = x5 + x3;
 
@@ -324,7 +265,7 @@ impl<B: Backend> RWKV7Model<B> {
             } else {
                 None
             };
-            let (new_x, new_v0, new_channel_state) = block.forward(i, x, v0, channel_state, self.d_model, self.n_heads);
+            let (new_x, new_v0, new_channel_state) = block.unfused_forward(i, x, v0, channel_state, self.d_model, self.n_heads);
             x = new_x;
             //println!("after block {i}: {x:?}");
 
