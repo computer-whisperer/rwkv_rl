@@ -5,7 +5,7 @@ use burn::prelude::{Backend, Device, Module};
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn_import::pytorch::PyTorchFileRecorder;
 use shakmaty::{Board, Move};
-use rwkv::rwkv7::{RWKV7Config, RWKV7Model};
+use rwkv_burn::rwkv7::{RWKV7Config, RWKV7Model};
 
 pub mod chess_bot;
 
@@ -22,10 +22,10 @@ pub fn load_model<B: Backend>(device: &Device<B>) -> RWKV7Model<B> {
     let model_path =
         if false {
             model_repo.join("rwkv-7-world/RWKV-x070-World-2.9B-v3-20250211-ctx4096.pth")
-        } else if true {
-            model_repo.join("temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth")
         } else if false {
-            model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-32%trained-20250319-ctx4k.pth")
+            model_repo.join("temp-latest-training-models/RWKV7-G1-2.9B-32%trained-20250327-ctx4k.pth")
+        } else if true {
+            model_repo.join("temp-latest-training-models/RWKV7-G1-1.5B-50%trained-20250330-ctx4k.pth")
         } else if false {
             model_repo.join("RWKV7-G1-1.5B-16%trained-20250308-ctx4k.pth")
         } else if false {

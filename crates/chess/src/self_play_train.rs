@@ -12,8 +12,8 @@ use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
 use shakmaty::Color::{Black, White};
-use rwkv::rwkv7::{RWKV7Model};
-use rwkv::RWKVForward;
+use rwkv_burn::rwkv7::{RWKV7Model};
+use rwkv_burn::RWKVForward;
 
 fn material_score(material: ByRole<u8>) -> f32 {
     let mut score = 0.0;

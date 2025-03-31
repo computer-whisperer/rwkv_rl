@@ -8,8 +8,8 @@ use shakmaty::san::San;
 use chessbot_lib::chess_bot::ChessBot;
 use chessbot_lib::load_model;
 use rwkv_tokenizer::WorldTokenizer;
-use rwkv::rwkv7::{RWKV7Model};
-use rwkv::RWKVForward;
+use rwkv_burn::rwkv7::{RWKV7Model};
+use rwkv_burn::RWKVForward;
 
 fn chess_self_play<B: Backend>(device: Device<B>)
 where

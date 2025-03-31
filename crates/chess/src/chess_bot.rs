@@ -9,8 +9,8 @@ use rand::{Rng, SeedableRng};
 use rwkv_tokenizer::WorldTokenizer;
 use shakmaty::{Chess, Color, Move, Position, Role};
 use shakmaty::san::San;
-use rwkv::context_manager::ContextManager;
-use rwkv::RWKVForward;
+use rwkv_burn::context_manager::ContextManager;
+use rwkv_burn::RWKVForward;
 
 pub struct ChessGameStepRecord {
     position: Chess,
@@ -25,7 +25,7 @@ pub struct ChessBot<B: Backend, M: RWKVForward<B>> {
     start_position: Option<Chess>,
     current_position_moves: Option<Vec<Move>>,
     pub turn_contexts: Vec<ContextManager<B, M>>,
-    sampler: rwkv::sampling::Sampler,
+    sampler: rwkv_burn::sampling::Sampler,
     move_rng: ThreadRng,
     context_manager: ContextManager<B, M>
 }
@@ -47,7 +47,7 @@ impl<B: Backend, M: RWKVForward<B>> ChessBot<B, M> {
         sc += SampleFreqPresence::new(0.10, 0.10, 128);
         sc += SampleTemperature::new(temperature);
         sc.push_sampler(SampleGreedy::new());
-        let sampler = rwkv::sampling::Sampler::LLMSamplers((sc,
+        let sampler = rwkv_burn::sampling::Sampler::LLMSamplers((sc,
             SimpleSamplerResources::new(
                 Some(Box::new(StdRng::seed_from_u64(seed))),
                 Some(vec![])

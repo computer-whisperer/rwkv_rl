@@ -1,12 +1,6 @@
 [submodule "crates/rusty_bar/libs/spring"]
 	path = crates/rusty_bar/libs/spring
 	url = https://github.com/beyond-all-reason/spring
-[submodule "libs/rwkv-tokenizer"]
-	path = libs/rwkv-tokenizer
-	url = git@github.com:computer-whisperer/rwkv-tokenizer.git
-[submodule "libs/RWKV-block"]
-	path = libs/RWKV-block
-	url = https://github.com/RWKV/RWKV-block
-[submodule "libs/burn"]
-	path = libs/burn
-	url = git@github.com:computer-whisperer/burn.git
+[submodule "libs/RWKV-burn"]
+	path = libs/RWKV-burn
+	url = git@github.com:computer-whisperer/RWKV-burn.git
